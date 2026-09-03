@@ -490,7 +490,15 @@ class Agent:
             msg = resp.choices[0].message
             tool_calls = getattr(msg, "tool_calls", None)
             if not tool_calls:
-                return (msg.content or "").strip()
+                text = (msg.content or "").strip()
+                # 纯对话/常识类回复（一轮下来没调用任何工具）：
+                # 也给一条轨迹说明，避免用户看到空面板误以为功能异常
+                if not self.executor.last_trace:
+                    self.executor.last_trace.append({
+                        "tool": "none", "label": "直接回答",
+                        "detail": "本轮无需读写数据（对话/常识类），未调用工具",
+                        "ok": True, "ms": 0})
+                return text
 
             # 回传 assistant 的工具调用，随后逐个执行
             messages.append({
