@@ -78,6 +78,14 @@
         <el-form-item label="描述">
           <el-input v-model="projDlg.description" type="textarea" :rows="2" />
         </el-form-item>
+        <el-form-item label="AI 规划">
+          <el-switch
+            v-model="projDlg.autoPlan"
+            active-text="创建后由 AI 自动规划任务（推荐）"
+            inline-prompt
+          />
+          <div class="dlg-tip">勾选后 Agent 会按项目主题自动生成约 5 条任务（默认待办），可在看板拖拽流转</div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="projDlg.visible = false">取消</el-button>
@@ -91,7 +99,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, FolderAdd } from '@element-plus/icons-vue'
-import { taskApi } from '../api'
+import { taskApi, projectApi } from '../api'
 import { useProjectStore } from '../stores/project'
 import TaskCard from '../components/TaskCard.vue'
 
@@ -107,7 +115,7 @@ const columns = [
 ]
 
 const taskDlg = reactive({ visible: false, title: '', description: '', priority: 'medium', submitting: false })
-const projDlg = reactive({ visible: false, name: '', description: '', submitting: false })
+const projDlg = reactive({ visible: false, name: '', description: '', autoPlan: true, submitting: false })
 
 const tasksBy = (status) => tasks.value.filter((t) => t.status === status)
 
@@ -174,16 +182,36 @@ async function submitTask() {
   finally { taskDlg.submitting = false }
 }
 
-function openCreateProject() { projDlg.visible = true; projDlg.name = ''; projDlg.description = '' }
+function openCreateProject() {
+  projDlg.visible = true
+  projDlg.name = ''
+  projDlg.description = ''
+  projDlg.autoPlan = true
+}
 async function submitProject() {
   if (!projDlg.name.trim()) return ElMessage.warning('请输入项目名称')
   projDlg.submitting = true
   try {
     const list = (await store.create(projDlg.name.trim(), projDlg.description)) || []
-    projDlg.visible = false
     const created = list.find((p) => p.name === projDlg.name.trim())
-    store.setCurrent(created?.id ?? list[0]?.id ?? store.currentId)
-    ElMessage.success('项目已创建')
+    const pid = created?.id ?? list[0]?.id ?? store.currentId
+    store.setCurrent(pid)
+    // 勾选「一键规划」：创建后立刻让 Agent 按项目主题自动生成任务（复用对话内同一条规划逻辑）
+    if (projDlg.autoPlan && pid != null) {
+      loading.value = true
+      try {
+        const res = await projectApi.plan(pid)
+        ElMessage.success(`AI 已自动规划 ${res.planned} 个任务（默认待办，可拖拽流转）`)
+      } catch (planErr) {
+        // 项目已创建成功；规划失败不影响使用，提示走对话页可重试
+        ElMessage.warning(`项目已创建，但 AI 规划失败：${planErr.message}。可去「AI 对话」页重新规划`)
+      } finally {
+        loading.value = false
+      }
+    } else {
+      ElMessage.success('项目已创建')
+    }
+    projDlg.visible = false
     await loadTasks()
   } catch (e) { ElMessage.error(e.message) }
   finally { projDlg.submitting = false }
@@ -211,4 +239,5 @@ onMounted(async () => {
 .col-dot { width: 10px; height: 10px; border-radius: 50%; }
 .col-title { font-weight: 600; color: #303133; }
 .col-body { min-height: 200px; }
+.dlg-tip { color: #909399; font-size: 12px; line-height: 1.5; margin-top: 4px; }
 </style>

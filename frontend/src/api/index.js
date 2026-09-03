@@ -24,6 +24,8 @@ export const projectApi = {
   create: (data) => http.post('/projects', data, { params: { user_id: USER_ID } }),
   update: (id, data) => http.patch(`/projects/${id}`, data),
   remove: (id) => http.delete(`/projects/${id}`),
+  // 看板「一键规划」：按项目主题让 AI 自动生成并创建任务
+  plan: (id) => http.post(`/projects/${id}/plan`, null, { params: { user_id: USER_ID } }),
 }
 
 // ---------- 任务 ----------
@@ -52,7 +54,12 @@ export const knowledgeApi = {
 export const chatApi = {
   send: (message, projectId = null) =>
     http.post('/chat/send', { message, user_id: USER_ID, project_id: projectId }),
-  history: () => http.get('/chat/history', { params: { user_id: USER_ID } }),
+  history: (projectId = null) =>
+    http.get('/chat/history', {
+      params: projectId
+        ? { user_id: USER_ID, project_id: projectId }
+        : { user_id: USER_ID },
+    }),
 }
 
 export default http

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from models.database import get_db
 from models.schemas import ProjectCreate, ProjectUpdate, ProjectOut
 from services import project_service
+from core.agent import _ToolExecutor
 
 router = APIRouter()
 
@@ -45,6 +46,23 @@ def update_project(project_id: int, body: ProjectUpdate, db: Session = Depends(g
     if p is None:
         raise HTTPException(404, f"项目 {project_id} 不存在")
     return p
+
+
+@router.post("/{project_id}/plan")
+def plan_project_tasks(project_id: int,
+                       user_id: int = Query(..., description="当前用户 id"),
+                       db: Session = Depends(get_db)):
+    """看板「一键规划」：按项目主题让 AI 自动生成并创建任务（与对话内规划同一条代码路径）。
+
+    供新建项目弹窗勾选「创建后由 AI 自动规划任务」调用；LLM 生成失败等异常返回 400。
+    """
+    if project_service.get_project(db, project_id) is None:
+        raise HTTPException(404, f"项目 {project_id} 不存在")
+    res = _ToolExecutor(user_id, project_id).plan_tasks()
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("error", "任务规划失败"))
+    return {"planned": len(res["data"]), "tasks": res["data"],
+            "note": res.get("note", "")}
 
 
 @router.delete("/{project_id}")

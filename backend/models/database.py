@@ -35,8 +35,23 @@ def get_db():
 
 
 def init_db() -> None:
-    """启动时调用：按模型定义建表（已存在则跳过）。"""
+    """启动时调用：按模型定义建表（已存在则跳过），随后执行轻量迁移（补列等）。"""
     Base.metadata.create_all(bind=engine)
+    _run_light_migrations(engine)
+
+
+def _run_light_migrations(engine) -> None:
+    """存量库轻量迁移：新增字段用 ALTER TABLE 补齐，避免删库。
+
+    说明：SQLite 的 ALTER 仅支持加列；加列需允许 NULL 且无默认值约束。
+    """
+    with engine.connect() as conn:
+        cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(chat_messages)")]
+        if "project_id" not in cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE chat_messages ADD COLUMN project_id INTEGER")
+            conn.commit()
+            print("[migrate] chat_messages 新增 project_id 列")
 
 
 # ---------- 数据表 ----------
@@ -65,6 +80,7 @@ class ChatMessage(Base):
     role = Column(String(20), nullable=False)  # system / user / assistant
     content = Column(Text, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)  # 对话所属项目（可为空）
     created_at = Column(DateTime, server_default=func.now())
 
     user = relationship("User", back_populates="messages")

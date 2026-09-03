@@ -212,7 +212,7 @@ def test_chat_bound_plan_goes_to_bound_project(client, monkeypatch):
     tb = client.get(f"/api/tasks?project_id={pb['id']}").json()
     ta = client.get(f"/api/tasks?project_id={pa['id']}").json()
     assert {t["title"] for t in tb} == {"规划任务甲", "规划任务乙"}
-    assert any(t["status"] == "doing" for t in tb)  # 首个任务置为进行中
+    assert tb and all(t["status"] == "todo" for t in tb)  # 规划任务统一默认待办
     assert ta == []
 
 
@@ -232,3 +232,30 @@ def test_chat_bound_blocks_other_project_plan(client, monkeypatch):
     # 两个项目都不应有新任务
     assert client.get(f"/api/tasks?project_id={pa['id']}").json() == []
     assert client.get(f"/api/tasks?project_id={pb['id']}").json() == []
+
+
+# ---------- 看板「一键规划」接口（POST /api/projects/{id}/plan） ----------
+
+def test_project_plan_endpoint(client, monkeypatch):
+    """新建项目勾选「AI 自动规划」→ 规划接口把任务建到该项目，统一默认待办。"""
+    def fake_chat_text(messages, **kwargs):
+        assert any(m["role"] == "user" for m in messages)
+        return ('[{"title":"一键规划任务甲","description":"d","priority":"high"},'
+                '{"title":"一键规划任务乙","description":"d","priority":"low"}]')
+
+    monkeypatch.setattr("core.llm.chat_text", fake_chat_text)
+
+    p = _new_project(client, "一键规划项目")
+    r = client.post(f"/api/projects/{p['id']}/plan", params={"user_id": 1})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["planned"] == 2
+    assert data["note"] and "待办" in data["note"]
+
+    tasks = client.get(f"/api/tasks?project_id={p['id']}").json()
+    assert {t["title"] for t in tasks} == {"一键规划任务甲", "一键规划任务乙"}
+    assert tasks and all(t["status"] == "todo" for t in tasks)
+
+    # 项目不存在 → 404
+    r404 = client.post("/api/projects/999999/plan", params={"user_id": 1})
+    assert r404.status_code == 404

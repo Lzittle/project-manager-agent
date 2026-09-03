@@ -373,7 +373,7 @@ class _ToolExecutor:
         if not tasks:
             return {"ok": False, "error": "任务规划生成失败（模型输出无法解析），请重试或直接说明任务明细"}
 
-        # 3) 批量落库，首个任务置为进行中
+        # 3) 批量落库（统一默认待办：规划≠开工，是否开始做由用户在看板拖拽决定）
         db = SessionLocal()
         try:
             created = []
@@ -383,12 +383,10 @@ class _ToolExecutor:
                     description=t["description"], priority=t["priority"], status="todo")
                 if tk:
                     created.append(tk)
-            if created:
-                task_service.update_task(db, created[0].id, status="doing")
             return {
                 "ok": True,
                 "data": [{"id": tk.id, "title": tk.title, "status": tk.status} for tk in created],
-                "note": f"已规划 {len(created)} 个任务，首个任务已置为进行中，可在看板查看并拖拽流转",
+                "note": f"已规划 {len(created)} 个任务（默认均为待办），可在看板查看并拖拽流转状态",
             }
         finally:
             db.close()
