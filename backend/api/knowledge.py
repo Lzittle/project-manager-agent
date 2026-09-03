@@ -8,13 +8,15 @@ from sqlalchemy.orm import Session
 
 from models.database import get_db
 from models.schemas import KnowledgeDocOut
-from services import knowledge_service
+from services import knowledge_service, project_service
 
 router = APIRouter()
 
 
 @router.get("/projects/{project_id}/documents", response_model=list[KnowledgeDocOut])
 def list_documents(project_id: int, db: Session = Depends(get_db)):
+    if project_service.get_project(db, project_id) is None:
+        raise HTTPException(404, f"项目 {project_id} 不存在")
     return knowledge_service.list_documents(db, project_id)
 
 

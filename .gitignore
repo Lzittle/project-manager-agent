@@ -29,3 +29,7 @@ frontend/.output
 *.swp
 *.swo
 .DS_Store
+
+# pytest 测试库
+backend/chroma_db_test/
+backend/test_project_manager.db
