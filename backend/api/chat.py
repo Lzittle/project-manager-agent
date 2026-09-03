@@ -12,9 +12,10 @@ import time
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from core.agent import Agent, resolve_bound_action
+from core.agent import Agent, resolve_bound_action, is_ask_detail_intent
 from models.database import get_db, ChatMessage
 from models.schemas import ChatRequest, ChatMessageOut
+from services import project_service
 
 router = APIRouter()
 
@@ -67,7 +68,26 @@ def chat_send(body: ChatRequest, db: Session = Depends(get_db)):
     agent = Agent(user_id=body.user_id, project_id=body.project_id)
     reply = None
     trace: list[dict] = []
-    if body.project_id is not None:
+
+    # 兜底 0：未绑定 + 只给任务数量不给明细（如「加两个任务」）且没点名项目
+    # → 代码层追问，避免模型猜项目/猜内容，更不会自动规划出一整批任务
+    if body.project_id is None and is_ask_detail_intent(body.message):
+        names = [p.name for p in project_service.list_projects(db, body.user_id)
+                 if p.name and p.name in body.message]
+        if not names:
+            reply = ("请补充两件事，我会马上执行：\n"
+                     "1) 给哪个项目加任务（项目名或先在右上角绑定）；\n"
+                     "2) 任务的具体内容，例如：\n"
+                     "   「加两个任务：① 优化登录页加载速度 ② 修复支付回调超时」\n\n"
+                     "如果你是想按项目主题自动拆解任务，请直接说「帮我规划任务」。")
+            trace = [{"tool": "ask", "label": "补充任务内容",
+                      "detail": "话术只说了任务数量、未给项目与明细，已追问（未写入任何任务）",
+                      "ok": True, "ms": 0}]
+
+    # 2) 确定性路由：先看有没有「代码层面就能拍板」的情况
+    #    —— 例如绑定 A 却说给 B 规划（conflict）、绑定后直接要规划任务（plan）。
+    #    这些不再交给 LLM 决策，从根上消除反问「给哪个项目」和跨项目串扰。
+    if reply is None and body.project_id is not None:
         action, payload = resolve_bound_action(
             db, body.user_id, body.project_id,
             agent.executor.project_name, body.message)
@@ -78,6 +98,14 @@ def chat_send(body: ChatRequest, db: Session = Depends(get_db)):
                      f"或先取消绑定再对我说要规划哪个项目。")
             trace = [{"tool": "guard", "label": "安全拦截",
                       "detail": f"话术点名绑定项目之外的「{payload}」，已拦截并提示先切换（未写入任何数据）",
+                      "ok": True, "ms": 0}]
+        elif action == "ask":
+            reply = ("收到，不过你只说了任务数量、还没给任务内容。"
+                     "请把要添加的任务发给我（我只会逐个创建、不会自动规划一整套），例如：\n"
+                     "「加两个任务：① 优化登录页加载速度 ② 修复支付回调超时」\n\n"
+                     "如果确实想按项目主题自动拆解一整套任务，请直接说「帮我规划任务」。")
+            trace = [{"tool": "ask", "label": "补充任务内容",
+                      "detail": "话术只给了任务数量、未给明细，已追问（未写入任何任务）",
                       "ok": True, "ms": 0}]
         elif action == "plan":
             _t0 = time.time()

@@ -315,3 +315,59 @@ def test_chat_agent_tool_loop_records_trace(client, monkeypatch):
     assert any(s["tool"] == "create_project" and s["ok"] for s in steps)
     refs = [rf for s in steps for rf in s.get("refs", [])]
     assert any(rf["kind"] == "project" for rf in refs)
+
+
+# ---------- 「加 N 个任务没给明细」→ 追问，绝不自动规划 ----------
+
+def test_chat_bound_ask_details_when_no_content(client):
+    """绑定项目时说「帮我加两个任务」但没给内容 → 追问，且不创建任何任务（不误触发规划）。"""
+    pa = _new_project(client, "追问项目A")
+
+    r = client.post("/api/chat/send",
+                    json={"message": "帮我加两个任务", "user_id": 1, "project_id": pa["id"]})
+    assert r.status_code == 200
+    reply = r.json()["reply"]
+    assert "没给任务内容" in reply or "请把要添加的任务" in reply
+    assert "规划" not in reply or "不会自动规划" in reply
+    assert r.json()["trace"][0]["tool"] == "ask"
+    # 项目里不应多出任务
+    assert client.get(f"/api/tasks?project_id={pa['id']}").json() == []
+
+
+def test_chat_unbound_ask_details_and_project(client):
+    """未绑定 + 「加两个任务」且没点名项目 → 追问项目与内容，两个维度都不让模型猜。"""
+    r = client.post("/api/chat/send", json={"message": "加两个任务", "user_id": 1})
+    assert r.status_code == 200
+    reply = r.json()["reply"]
+    assert "哪个项目" in reply and "①" in reply
+    assert r.json()["trace"][0]["tool"] == "ask"
+
+
+def test_chat_task_add_with_details_still_creates(client, monkeypatch):
+    """给了明细（「任务：」+ 内容）不被拦截，照常走工具逐个创建（防误伤回归）。"""
+    from types import SimpleNamespace
+
+    calls = {"n": 0}
+
+    def fake_chat(messages, tools=None, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            tc = SimpleNamespace(
+                id="call_1", type="function",
+                function=SimpleNamespace(
+                    name="create_task",
+                    arguments='{"title": "登录页性能优化", "priority": "high"}'))
+            return SimpleNamespace(choices=[
+                SimpleNamespace(message=SimpleNamespace(content=None, tool_calls=[tc]))])
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(content="已创建任务", tool_calls=None))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+
+    pa = _new_project(client, "明细项目A")
+    r = client.post("/api/chat/send",
+                    json={"message": "加两个任务：① 登录页优化 ② 支付修复",
+                          "user_id": 1, "project_id": pa["id"]})
+    assert r.status_code == 200
+    tasks = client.get(f"/api/tasks?project_id={pa['id']}").json()
+    assert len(tasks) == 1  # mock 只建 1 条（明细路径未被 ask 拦截）

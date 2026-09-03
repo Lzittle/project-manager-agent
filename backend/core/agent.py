@@ -94,11 +94,32 @@ def find_project_mention(db, user_id: int, bound_project_id: int, text: str):
 
 # ---------- 绑定项目时的确定性路由（代码判定，先于 LLM 决策） ----------
 _TASK_ADD_HINT = re.compile(r"(?:加|建|创建|新增|添加|安排|补)\S{0,4}任务|任务[:：]")
+# 出现「数量 + 个任务」（如：加两个任务 / 增加 3 个任务 / 加几个任务）
+_COUNT_TASK = re.compile(r"(?:[0-9]+|[一二两三四五六七八九十]|两|几|多)\s*个\s*任务")
+# 已给出任务明细的特征（引号包裹 或 「任务：」冒号后跟内容）
+_DETAIL_MARK = re.compile(r"[「『【]|任务\s*[:：]")
 
 
 def _is_task_write_intent(text: str) -> bool:
     """是否「要往某个项目写任务」：规划意图 或 显式「加/建任务」指令。"""
     return is_plan_intent(text) or bool(_TASK_ADD_HINT.search(text))
+
+
+def is_ask_detail_intent(text: str) -> bool:
+    """写任务意图但用户只给了「数量/泛泛几个任务」、没有任何任务明细 →
+    代码层直接追问内容，防止模型把「加 2 个任务」误当成主题规划一次生成 5 条。
+
+    例如命中：
+      「帮我加两个任务」「增加3个任务」「加几个任务吧」
+    不命中（已有明细，交给 Agent 逐个创建）：
+      「加两个任务：① 登录页优化 ② 支付修复」
+      「给 XX 加一个任务：上线前回归测试」
+    """
+    if not _is_task_write_intent(text):
+        return False
+    if is_plan_intent(text):  # 「帮我规划几个任务」→ 仍是按主题规划，不拦
+        return False
+    return bool(_COUNT_TASK.search(text)) and not _DETAIL_MARK.search(text)
 
 
 def resolve_bound_action(db, user_id: int, bound_project_id: Optional[int],
@@ -108,6 +129,8 @@ def resolve_bound_action(db, user_id: int, bound_project_id: Optional[int],
     返回 (action, payload)：
       ("conflict", other_name)  消息要写任务却点名绑定项目之外的项目
                                 → 提示先切换，绝不跨项目写数据；
+      ("ask",      None)        要加任务但只给数量/没给明细（如「加两个任务」）
+                                → 先追问内容，绝不自动规划一整批；
       ("plan",      None)       纯规划意图 → 直接对绑定项目执行 plan_tasks；
       ("agent",     None)       其余 → 交给 Agent 工具循环（工具已按绑定项目裁剪）。
 
@@ -121,6 +144,8 @@ def resolve_bound_action(db, user_id: int, bound_project_id: Optional[int],
         return ("conflict", other.name)
     if is_plan_intent(message):
         return ("plan", None)
+    if is_ask_detail_intent(message):
+        return ("ask", None)
     return ("agent", None)
 
 
