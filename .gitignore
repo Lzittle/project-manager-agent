@@ -8,6 +8,8 @@ __pycache__/
 # 密钥！严禁提交
 backend/.env
 backend/.env.*
+# 但 .env.example 模板允许入库
+!backend/.env.example
 
 # 数据库、向量库
 backend/*.db

@@ -1,0 +1,8 @@
+fastapi>=0.112.0
+uvicorn[standard]>=0.30.0
+python-dotenv>=1.0.1
+chromadb>=0.5.0
+sqlalchemy>=2.0
+openai>=1.30
+pydantic>=2.5
+python-multipart
