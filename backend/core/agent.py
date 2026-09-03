@@ -13,11 +13,12 @@
 数据访问统一走 services 层（与 REST API 共用），见 services/。
 """
 import json
+import re
 from typing import Any, Optional
 
 from core import llm
 from core.rag import search as rag_search
-from models.database import SessionLocal
+from models.database import SessionLocal, Project
 from services import project_service, task_service
 
 MAX_ITER = 8  # 单轮最多工具迭代次数，防死循环
@@ -27,9 +28,9 @@ def build_system_prompt(project_id: Optional[int] = None) -> str:
 
 工具使用规则：
 1. 用户要「创建项目、创建任务、查任务列表、推进任务状态、看有哪些项目」时调用对应工具；
-2. 用户问题涉及项目资料（需求、方案、验收标准、模块功能等）时调用 search_knowledge 检索相关文档后再回答；
-3. 纯闲聊、问候、与项目无关的内容直接回答，不要调用工具；
-4. 创建任务时，若用户一次性给出多个任务，请逐个调用 create_task；
+2. 用户要求「规划任务/拆解任务/自动生成几个任务/包含 N 个任务」但**未给出任务明细**时：若项目还不存在先 create_project，然后调用 plan_tasks 自动规划；若用户已列出任务明细，则逐个 create_task，不要用 plan_tasks；
+3. 用户问题涉及项目资料（需求、方案、验收标准、模块功能等）时调用 search_knowledge 检索相关文档后再回答；
+4. 纯闲聊、问候、与项目无关的内容直接回答，不要调用工具；
 5. 只能依据工具返回的真实数据回答，不要编造项目或任务信息；
 6. 使用简体中文，回答简洁清晰。"""
     if project_id is not None:
@@ -100,6 +101,14 @@ TOOLS: list[dict] = [
         {"query": {"type": "string", "description": "检索问题"},
          "project_id": {"type": "integer", "description": "限定项目（可空）"}},
         ["query"],
+    ),
+    _fn(
+        "plan_tasks",
+        "为指定项目自动规划一组任务：根据项目主题调用大模型生成约 5 条落地任务并创建入库（首个任务置为进行中）。"
+        "用于用户说「规划任务/拆解任务/自动生成 N 个任务/包含几个任务」但未给出具体任务清单时；若用户已列出任务明细，直接用 create_task 逐个创建",
+        {"project_id": {"type": "integer", "description": "要规划任务的项目 id"},
+         "goal": {"type": "string", "description": "规划目标/主题（可空，缺省用项目名）"}},
+        ["project_id"],
     ),
 ]
 
@@ -178,6 +187,77 @@ class _ToolExecutor:
                 {"title": h["title"], "text": h["text"][:500]} for h in hits]}
         except Exception as e:  # embedding 模型未就绪等场景
             return {"ok": False, "error": f"知识库检索失败: {e}"}
+
+    # ---------- 任务自动规划（plan_tasks 工具） ----------
+    @staticmethod
+    def _parse_tasks(raw: str) -> list[dict]:
+        """从模型输出中提取任务 JSON 数组（容忍 ```json 围栏与多余文字）。"""
+        text = raw.strip()
+        m = re.search(r"\[[\s\S]*\]", text)
+        if not m:
+            return []
+        try:
+            data = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(data, list):
+            return []
+        out = []
+        for item in data:
+            if isinstance(item, dict) and item.get("title"):
+                out.append({
+                    "title": str(item["title"]).strip()[:200],
+                    "description": str(item.get("description", "")).strip()[:500],
+                    "priority": item.get("priority", "medium") if item.get("priority") in ("high", "medium", "low") else "medium",
+                })
+        return out
+
+    def plan_tasks(self, project_id: int, goal: str = "") -> dict:
+        # 1) 项目校验 + 确定主题
+        db = SessionLocal()
+        try:
+            p = db.get(Project, project_id)
+            if p is None:
+                return {"ok": False, "error": f"项目 {project_id} 不存在"}
+            topic = (goal or f"{p.name} 项目").strip()
+        finally:
+            db.close()
+
+        # 2) 调用 LLM 生成任务规划
+        try:
+            raw = llm.chat_text([
+                {"role": "system", "content":
+                 "你是敏捷项目管理专家。基于项目主题规划 5 条具体可执行的落地任务。"
+                 "只输出 JSON 数组，不要任何多余文字或代码块标记。格式："
+                 '[{"title":"任务标题(不超过14字)","description":"一句话描述含验收要点","priority":"high|medium|low"}]'},
+                {"role": "user", "content": f"项目主题：{topic}"},
+            ], temperature=0.4, max_tokens=900)
+        except Exception as e:
+            return {"ok": False, "error": f"任务规划生成失败: {e}"}
+
+        tasks = self._parse_tasks(raw)
+        if not tasks:
+            return {"ok": False, "error": "任务规划生成失败（模型输出无法解析），请重试或直接说明任务明细"}
+
+        # 3) 批量落库，首个任务置为进行中
+        db = SessionLocal()
+        try:
+            created = []
+            for t in tasks[:6]:
+                tk = task_service.create_task(
+                    db, project_id, self.user_id, t["title"],
+                    description=t["description"], priority=t["priority"], status="todo")
+                if tk:
+                    created.append(tk)
+            if created:
+                task_service.update_task(db, created[0].id, status="doing")
+            return {
+                "ok": True,
+                "data": [{"id": tk.id, "title": tk.title, "status": tk.status} for tk in created],
+                "note": f"已规划 {len(created)} 个任务，首个任务已置为进行中，可在看板查看并拖拽流转",
+            }
+        finally:
+            db.close()
 
     def dispatch(self, name: str, args: dict) -> dict:
         fn = getattr(self, name, None)
