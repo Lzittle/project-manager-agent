@@ -20,6 +20,11 @@
         <li>绑定项目后问答，答案来自上传到知识库的文档（需求、方案、验收标准）</li>
         <li>用自然语言推进任务：加任务、标记完成、查进度，看板实时同步</li>
       </ul>
+      <div class="guide-actions">
+        <el-button type="primary" plain :loading="demoBusy" @click="runDemo">
+          ▶ 一键演示：Agent 从零建项目并规划
+        </el-button>
+      </div>
       <div class="chips">
         <el-tag
           v-for="q in quickExamples"
@@ -36,7 +41,14 @@
 
     <!-- 消息区 -->
     <div ref="scrollRef" class="msg-area">
-      <ChatMessage v-for="(m, i) in messages" :key="i" :role="m.role" :content="m.content" />
+      <ChatMessage
+        v-for="(m, i) in messages"
+        :key="i"
+        :role="m.role"
+        :content="m.content"
+        :trace="m.trace"
+        @goto="gotoRef"
+      />
       <div v-if="loading" class="typing">
         <ChatMessage role="assistant" content="正在思考并调用工具…" />
       </div>
@@ -61,17 +73,20 @@
 
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Promotion, Refresh } from '@element-plus/icons-vue'
-import { chatApi } from '../api'
+import { chatApi, taskApi } from '../api'
 import { useProjectStore } from '../stores/project'
 import ChatMessage from '../components/ChatMessage.vue'
 
 const store = useProjectStore()
+const router = useRouter()
 const messages = ref([])
 const draft = ref('')
 const loading = ref(false)
 const bindProject = ref(null)
+const demoBusy = ref(false)
 const scrollRef = ref(null)
 
 // 空态示例：优先以「当前绑定/首个项目」真实名称生成，保证点下去一定有效
@@ -93,12 +108,17 @@ const quickExamples = computed(() => {
 async function loadHistory(projectId = null) {
   try {
     const rows = await chatApi.history(projectId)
-    messages.value = rows.map((r) => ({ role: r.role, content: r.content }))
+    messages.value = rows.map((r) => ({
+      role: r.role,
+      content: r.content,
+      trace: r.trace || [],
+    }))
   } catch { /* 历史加载失败忽略 */ }
 }
 
-// 切换绑定项目 -> 加载该项目自己的对话上下文（防止跨项目串扰）
+// 切换绑定项目 -> 加载该项目自己的对话上下文（防止跨项目串扰）；演示脚本运行时跳过
 watch(bindProject, (val) => {
+  if (demoBusy.value) return
   loadHistory(val)
 })
 
@@ -111,12 +131,44 @@ async function send(text) {
   scrollToBottom()
   try {
     const res = await chatApi.send(content, bindProject.value)
-    messages.value.push({ role: 'assistant', content: res.reply })
+    messages.value.push({ role: 'assistant', content: res.reply, trace: res.trace || [] })
   } catch (e) {
     messages.value.push({ role: 'assistant', content: `⚠️ 出错了：${e.message}` })
   } finally {
     loading.value = false
     scrollToBottom()
+  }
+}
+
+// 实体引用跳转：任务/项目 chip → 打开所属项目看板
+function gotoRef(ref) {
+  const pid = ref.kind === 'project' ? ref.id : ref.project_id
+  if (!pid) return ElMessage.warning('无法定位该项目，请手动切换')
+  store.setCurrent(pid)
+  router.push('/board')
+}
+
+// 一键演示：自动串起「建项目 → 绑定 → 规划任务 → 查任务」，展示多工具执行轨迹
+const DEMO_NAME = '官网改版'
+async function runDemo() {
+  if (demoBusy.value || loading.value) return
+  demoBusy.value = true
+  try {
+    if (!store.projects.length) await store.load()
+    let p = store.projects.find((x) => x.name === DEMO_NAME)
+    if (!p) {
+      const list = (await store.create(DEMO_NAME, 'Agent 一键演示项目（可随时删除）')) || []
+      p = list.find((x) => x.name === DEMO_NAME)
+    }
+    if (!p) { ElMessage.error('演示项目创建失败，请稍后重试'); return }
+    bindProject.value = p.id
+    resetChat()
+    const exist = await taskApi.list(p.id).catch(() => [])
+    if (!exist.length) await send('帮我规划几个任务')
+    await send('现在有哪些任务？')
+    ElMessage.success('演示完成：已展示 Agent 建项目 + 规划 + 查询的执行轨迹，可展开上方步骤查看')
+  } finally {
+    demoBusy.value = false
   }
 }
 
@@ -145,7 +197,8 @@ onMounted(async () => {
 .guide-title { font-size: 20px; font-weight: 700; color: #303133; text-align: center; }
 .guide-sub { color: #909399; font-size: 13px; text-align: center; margin: 8px 0 18px; }
 .guide-bullets { max-width: 540px; margin: 0 auto; padding-left: 20px; color: #606266; font-size: 13px; line-height: 2.1; }
-.chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 20px; }
+.guide-actions { display: flex; justify-content: center; margin-top: 20px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 12px; }
 .chip { cursor: pointer; }
 .guide-note { margin-top: 16px; text-align: center; color: #b1b3b8; font-size: 12px; }
 .msg-area {
