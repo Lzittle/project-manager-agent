@@ -9,17 +9,21 @@
   查询项目信息/知识     → search_knowledge（RAG 检索项目知识库）
   创建/查询项目         → create_project / list_projects
   创建任务/改状态       → create_task / update_task_status / list_tasks
+
+数据访问统一走 services 层（与 REST API 共用），见 services/。
 """
 import json
 from typing import Any, Optional
 
 from core import llm
 from core.rag import search as rag_search
-from models.database import SessionLocal, Project, Task
+from models.database import SessionLocal
+from services import project_service, task_service
 
 MAX_ITER = 8  # 单轮最多工具迭代次数，防死循环
 
-SYSTEM_PROMPT = """你是「项目管理 Agent」，帮用户用自然语言管理项目和任务，也能基于项目知识库文档回答问题。
+def build_system_prompt(project_id: Optional[int] = None) -> str:
+    prompt = """你是「项目管理 Agent」，帮用户用自然语言管理项目和任务，也能基于项目知识库文档回答问题。
 
 工具使用规则：
 1. 用户要「创建项目、创建任务、查任务列表、推进任务状态、看有哪些项目」时调用对应工具；
@@ -28,6 +32,13 @@ SYSTEM_PROMPT = """你是「项目管理 Agent」，帮用户用自然语言管�
 4. 创建任务时，若用户一次性给出多个任务，请逐个调用 create_task；
 5. 只能依据工具返回的真实数据回答，不要编造项目或任务信息；
 6. 使用简体中文，回答简洁清晰。"""
+    if project_id is not None:
+        prompt += (
+            f"\n\n当前对话已绑定项目（project_id={project_id}）。"
+            f"除非用户明确说「创建/新建」一个新项目，否则禁止调用 create_project；"
+            f"谈及该项目的内容一律用 list_tasks / search_knowledge 查询，绝不重复创建同名项目。"
+        )
+    return prompt
 
 
 # ---------- 工具定义 ----------
@@ -93,74 +104,65 @@ TOOLS: list[dict] = [
 ]
 
 
-# ---------- 工具执行（业务逻辑，直接操作数据库） ----------
+# ---------- 工具执行（业务逻辑经 services 层，user_id 由会话注入不暴露给模型） ----------
 class _ToolExecutor:
-    """把工具调用分发到具体函数；user_id 由会话上下文注入，不暴露给模型。"""
-
     def __init__(self, user_id: int, project_id: Optional[int] = None):
         self.user_id = user_id
         self.project_id = project_id
 
-    def _db(self):
-        return SessionLocal()
+    def _project_brief(self, p) -> dict:
+        return {"id": p.id, "name": p.name, "description": p.description,
+                "status": p.status, "task_count": len(p.tasks)}
+
+    def _task_brief(self, t) -> dict:
+        return {"id": t.id, "title": t.title, "description": t.description,
+                "status": t.status, "priority": t.priority}
 
     def list_projects(self) -> dict:
-        db = self._db()
+        db = SessionLocal()
         try:
-            projects = db.query(Project).filter_by(creator_id=self.user_id)\
-                .order_by(Project.id.desc()).all()
-            return {"ok": True, "data": [
-                {"id": p.id, "name": p.name, "description": p.description,
-                 "status": p.status, "task_count": len(p.tasks)} for p in projects]}
+            data = [self._project_brief(p)
+                    for p in project_service.list_projects(db, self.user_id)]
+            return {"ok": True, "data": data}
         finally:
             db.close()
 
     def create_project(self, name: str, description: str = "") -> dict:
-        db = self._db()
+        db = SessionLocal()
         try:
-            p = Project(name=name, description=description or "",
-                        status="active", creator_id=self.user_id)
-            db.add(p)
-            db.commit()
+            p = project_service.create_project(db, self.user_id, name, description)
             return {"ok": True, "data": {"id": p.id, "name": p.name, "status": p.status}}
         finally:
             db.close()
 
     def list_tasks(self, project_id: int) -> dict:
-        db = self._db()
+        db = SessionLocal()
         try:
-            tasks = db.query(Task).filter_by(project_id=project_id)\
-                .order_by(Task.id.desc()).all()
-            return {"ok": True, "data": [
-                {"id": t.id, "title": t.title, "status": t.status,
-                 "priority": t.priority, "description": t.description} for t in tasks]}
+            data = [self._task_brief(t) for t in task_service.list_tasks(db, project_id)]
+            return {"ok": True, "data": data}
         finally:
             db.close()
 
     def create_task(self, project_id: int, title: str, description: str = "",
                     status: str = "todo", priority: str = "medium") -> dict:
-        db = self._db()
+        db = SessionLocal()
         try:
-            proj = db.get(Project, project_id)
-            if proj is None:
+            t = task_service.create_task(
+                db, project_id, self.user_id, title,
+                description=description, status=status, priority=priority)
+            if t is None:
                 return {"ok": False, "error": f"项目 {project_id} 不存在"}
-            t = Task(title=title, description=description or "", status=status,
-                     priority=priority, project_id=project_id, assignee_id=self.user_id)
-            db.add(t)
-            db.commit()
             return {"ok": True, "data": {"id": t.id, "title": t.title,
                                          "project_id": project_id, "status": t.status}}
         finally:
             db.close()
 
     def update_task_status(self, task_id: int, status: str) -> dict:
-        db = self._db()
+        db = SessionLocal()
         try:
-            t = db.get(Task, task_id)
+            t = task_service.update_task(db, task_id, status=status)
             if t is None:
                 return {"ok": False, "error": f"任务 {task_id} 不存在"}
-            t.status = status
-            db.commit()
             return {"ok": True, "data": {"id": t.id, "title": t.title, "status": t.status}}
         finally:
             db.close()
@@ -174,7 +176,7 @@ class _ToolExecutor:
                         "note": "未检索到相关文档片段，可如实告知用户知识库暂无相关内容"}
             return {"ok": True, "data": [
                 {"title": h["title"], "text": h["text"][:500]} for h in hits]}
-        except Exception as e:  # 模型未就绪等场景
+        except Exception as e:  # embedding 模型未就绪等场景
             return {"ok": False, "error": f"知识库检索失败: {e}"}
 
     def dispatch(self, name: str, args: dict) -> dict:
@@ -194,7 +196,7 @@ class Agent:
 
     def run(self, message: str, history: Optional[list[dict]] = None) -> str:
         """执行一轮对话。history: 此前 {role: user/assistant, content} 列表（不含工具消息）。"""
-        messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages: list[dict[str, Any]] = [{"role": "system", "content": build_system_prompt(self.executor.project_id)}]
         for h in history or []:
             messages.append({"role": h["role"], "content": h["content"]})
         messages.append({"role": "user", "content": message})
