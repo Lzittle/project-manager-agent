@@ -7,15 +7,6 @@
   >
     <div class="tc-head">
       <span class="tc-pri" :class="task.priority">{{ priText }}</span>
-      <!-- 拖拽手柄：替代原全局 #id 展示（全局 id 会跳号，对用户无意义） -->
-      <svg class="tc-grip" viewBox="0 0 10 14" fill="currentColor" aria-hidden="true">
-        <circle cx="2.5" cy="2.5" r="1.4" />
-        <circle cx="7.5" cy="2.5" r="1.4" />
-        <circle cx="2.5" cy="7" r="1.4" />
-        <circle cx="7.5" cy="7" r="1.4" />
-        <circle cx="2.5" cy="11.5" r="1.4" />
-        <circle cx="7.5" cy="11.5" r="1.4" />
-      </svg>
     </div>
     <div class="tc-title">{{ task.title }}</div>
     <div v-if="task.description" class="tc-desc">{{ task.description }}</div>
@@ -80,8 +71,6 @@ function onDragStart(e) {
 .tc-pri.high { background: #f56c6c; }
 .tc-pri.medium { background: #e6a23c; }
 .tc-pri.low { background: #909399; }
-.tc-grip { color: #c0c4cc; opacity: 0.7; transition: opacity 0.2s, color 0.2s; cursor: grab; }
-.task-card:hover .tc-grip { opacity: 1; color: #909399; }
 .tc-title { font-size: 14px; font-weight: 600; color: #303133; margin-bottom: 4px; }
 .tc-desc {
   font-size: 12px;
