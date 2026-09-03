@@ -5,6 +5,7 @@
 import hashlib
 from datetime import date
 
+from core import rag
 from models.database import (
     SessionLocal, init_db,
     User, Project, Task, KnowledgeDocument, ChatMessage,
@@ -73,7 +74,8 @@ def seed() -> None:
                         priority=priority, project_id=p2.id, assignee_id=alice.id))
 
         # ---- 知识库文档 1 篇（RAG 演示用，埋独特关键词便于检索命中验证）----
-        db.add(KnowledgeDocument(
+        # 落库后立即向量化，保证重置后知识库立即可检索
+        doc1 = KnowledgeDocument(
             title="电商系统需求说明",
             content=(
                 "电商系统面向中小商家提供一站式开店能力，核心模块：\n"
@@ -86,13 +88,14 @@ def seed() -> None:
             ),
             file_type="md",
             project_id=p1.id,
-        ))
-
-        # ---- 1 条对话历史 ----
+        )
+        db.add(doc1)
+        db.flush()  # 先取 doc.id
+        rag.index_document(doc1.id, doc1.project_id, doc1.title, doc1.content)
         db.add(ChatMessage(role="user", content="帮我创建一个电商系统项目", user_id=alice.id))
 
         db.commit()
-        print(f"[ok] seed 完成：用户 1 / 项目 2 / 任务 {len(tasks_p1) + 3} / 文档 1 / 对话 1")
+        print(f"[ok] seed 完成：用户 1 / 项目 2 / 任务 {len(tasks_p1) + 3} / 文档 1(已向量化) / 对话 1")
         print(f"[ok] 演示账号: alice / {DEMO_PASSWORD} (密码为 sha256 演示哈希)")
     finally:
         db.close()
