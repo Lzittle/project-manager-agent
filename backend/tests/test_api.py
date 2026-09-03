@@ -228,6 +228,8 @@ def test_chat_bound_blocks_other_project_plan(client, monkeypatch):
     reply = r.json()["reply"]
     assert "切换" in reply and pb["name"] in reply
     assert "已为" not in reply  # 未触发规划
+    # 拦截路径也应返回 guard 轨迹，让用户看到"Agent 做了什么"
+    assert r.json()["trace"][0]["tool"] == "guard"
 
     # 两个项目都不应有新任务
     assert client.get(f"/api/tasks?project_id={pa['id']}").json() == []
@@ -259,3 +261,57 @@ def test_project_plan_endpoint(client, monkeypatch):
     # 项目不存在 → 404
     r404 = client.post("/api/projects/999999/plan", params={"user_id": 1})
     assert r404.status_code == 404
+
+
+# ---------- Agent 执行轨迹（trace） ----------
+
+def test_chat_plan_returns_trace_and_persists(client, monkeypatch):
+    """绑定项目规划：/send 返回 plan_tasks 轨迹步骤，且历史消息可回放同一 trace。"""
+    def fake_chat_text(messages, **kwargs):
+        return '[{"title":"轨迹任务甲","description":"d","priority":"medium"}]'
+
+    monkeypatch.setattr("core.llm.chat_text", fake_chat_text)
+    p = _new_project(client, "轨迹项目A")
+
+    r = client.post("/api/chat/send",
+                    json={"message": "帮我规划几个任务", "user_id": 1, "project_id": p["id"]})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["trace"] and data["trace"][0]["tool"] == "plan_tasks"
+    step = data["trace"][0]
+    assert step["ok"] is True and len(step.get("refs", [])) == 1
+    assert step["refs"][0]["kind"] == "task"
+
+    # 历史接口中该条 assistant 消息的 trace 同样可解析回放
+    hist = client.get(f"/api/chat/history?user_id=1&project_id={p['id']}").json()
+    asst = [m for m in hist if m["role"] == "assistant"][-1]
+    assert asst["trace"] and asst["trace"][0]["tool"] == "plan_tasks"
+
+
+def test_chat_agent_tool_loop_records_trace(client, monkeypatch):
+    """未绑定走 Agent 工具循环：dispatch 自动记录工具步骤与受影响实体引用。"""
+    from types import SimpleNamespace
+
+    calls = {"n": 0}
+
+    def fake_chat(messages, tools=None, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            tc = SimpleNamespace(
+                id="call_1", type="function",
+                function=SimpleNamespace(
+                    name="create_project",
+                    arguments='{"name": "轨迹工具项目", "description": "trace"}'))
+            return SimpleNamespace(choices=[
+                SimpleNamespace(message=SimpleNamespace(content=None, tool_calls=[tc]))])
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(content="已创建项目", tool_calls=None))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+
+    r = client.post("/api/chat/send", json={"message": "帮我创建一个项目", "user_id": 1})
+    assert r.status_code == 200
+    steps = r.json()["trace"]
+    assert any(s["tool"] == "create_project" and s["ok"] for s in steps)
+    refs = [rf for s in steps for rf in s.get("refs", [])]
+    assert any(rf["kind"] == "project" for rf in refs)

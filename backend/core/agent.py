@@ -14,6 +14,7 @@
 """
 import json
 import re
+import time
 from typing import Any, Optional
 
 from core import llm
@@ -22,6 +23,12 @@ from models.database import SessionLocal, Project
 from services import project_service, task_service
 
 MAX_ITER = 8  # 单轮最多工具迭代次数，防死循环
+
+
+def _clip(v: Any, limit: int = 120) -> str:
+    """把任意值压成适合展示的短字符串（截断超长文本/参数）。"""
+    s = json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v
+    return s if len(s) <= limit else s[:limit] + "…"
 
 def build_system_prompt(project_id: Optional[int] = None,
                         project_name: Optional[str] = None) -> str:
@@ -228,6 +235,8 @@ class _ToolExecutor:
     def __init__(self, user_id: int, project_id: Optional[int] = None):
         self.user_id = user_id
         self.project_id = project_id
+        # 本轮会话的执行轨迹（Agent 感可见化）：每执行一个工具记一条
+        self.last_trace: list[dict] = []
         # 缓存绑定项目名：注入 system prompt，防止模型引用错项目名
         self.project_name: Optional[str] = None
         if project_id is not None:
@@ -299,7 +308,8 @@ class _ToolExecutor:
             t = task_service.update_task(db, task_id, status=status)
             if t is None:
                 return {"ok": False, "error": f"任务 {task_id} 不存在"}
-            return {"ok": True, "data": {"id": t.id, "title": t.title, "status": t.status}}
+            return {"ok": True, "data": {"id": t.id, "title": t.title, "status": t.status,
+                                         "project_id": t.project_id}}
         finally:
             db.close()
 
@@ -314,6 +324,61 @@ class _ToolExecutor:
                 {"title": h["title"], "text": h["text"][:500]} for h in hits]}
         except Exception as e:  # embedding 模型未就绪等场景
             return {"ok": False, "error": f"知识库检索失败: {e}"}
+
+    # ---------- 执行轨迹（让每一步工具调用对用户可见、可跳转） ----------
+    _LABELS = {
+        "create_project": "创建项目", "list_projects": "查看项目列表",
+        "list_tasks": "查看任务", "create_task": "创建任务",
+        "update_task_status": "更新任务状态", "search_knowledge": "检索知识库",
+        "plan_tasks": "自动规划任务",
+    }
+
+    def _refs_from(self, name: str, args: dict, result: dict) -> list[dict]:
+        """提取受影响的实体（任务/项目），供前端渲染可点击跳转的引用。"""
+        data = result.get("data") if result.get("ok") else None
+        refs = []
+        if name == "create_project" and isinstance(data, dict):
+            refs.append({"kind": "project", "id": data["id"], "title": data.get("name", "")})
+        elif name in ("create_task", "update_task_status") and isinstance(data, dict):
+            refs.append({"kind": "task", "id": data["id"], "title": data.get("title", ""),
+                         "project_id": data.get("project_id")})
+        elif name == "plan_tasks" and isinstance(data, list):
+            pid = args.get("project_id") or self.project_id
+            for t in data:
+                refs.append({"kind": "task", "id": t["id"], "title": t["title"],
+                             "project_id": pid})
+        return refs
+
+    def summarize_tool(self, name: str, args: dict, result: dict, ms: int = 0) -> dict:
+        """把一次工具调用压成一条对用户友好的轨迹步骤。"""
+        label = self._LABELS.get(name, name)
+        if not result.get("ok"):
+            return {"tool": name, "label": label,
+                    "detail": _clip(result.get("error", "执行失败"), 100),
+                    "ok": False, "ms": ms}
+        data = result.get("data")
+        if name == "create_project" and isinstance(data, dict):
+            detail = f"创建项目「{data.get('name','')}」（#{data['id']}）"
+        elif name == "create_task" and isinstance(data, dict):
+            detail = f"创建任务「{data.get('title','')}」（#{data['id']}）"
+        elif name == "update_task_status" and isinstance(data, dict):
+            detail = f"任务「{data.get('title','')}」状态 → {data.get('status','')}"
+        elif name == "plan_tasks" and isinstance(data, list):
+            detail = f"生成 {len(data)} 条任务并入库（默认待办）"
+        elif name == "list_projects" and isinstance(data, list):
+            detail = f"共 {len(data)} 个项目"
+        elif name == "list_tasks" and isinstance(data, list):
+            detail = f"共 {len(data)} 个任务"
+        elif name == "search_knowledge" and isinstance(data, list):
+            detail = f"检索到 {len(data)} 条相关片段" if data else "知识库暂无相关内容"
+        else:
+            detail = f"{label}完成"
+        step = {"tool": name, "label": label, "detail": _clip(detail, 120),
+                "ok": True, "ms": ms}
+        refs = self._refs_from(name, args, result)
+        if refs:
+            step["refs"] = refs
+        return step
 
     # ---------- 任务自动规划（plan_tasks 工具） ----------
     @staticmethod
@@ -395,10 +460,14 @@ class _ToolExecutor:
         fn = getattr(self, name, None)
         if fn is None:
             return {"ok": False, "error": f"未知工具 {name}"}
+        t0 = time.time()
         try:
-            return fn(**args)
+            result = fn(**args)
         except Exception as e:
-            return {"ok": False, "error": f"工具执行异常: {e}"}
+            result = {"ok": False, "error": f"工具执行异常: {e}"}
+        ms = int((time.time() - t0) * 1000)
+        self.last_trace.append(self.summarize_tool(name, args, result, ms))
+        return result
 
 
 # ---------- Agent 主循环 ----------

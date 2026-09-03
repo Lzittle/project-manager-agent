@@ -52,6 +52,11 @@ def _run_light_migrations(engine) -> None:
                 "ALTER TABLE chat_messages ADD COLUMN project_id INTEGER")
             conn.commit()
             print("[migrate] chat_messages 新增 project_id 列")
+        if "trace" not in cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE chat_messages ADD COLUMN trace TEXT")
+            conn.commit()
+            print("[migrate] chat_messages 新增 trace 列（Agent 执行轨迹 meta JSON）")
 
 
 # ---------- 数据表 ----------
@@ -81,6 +86,7 @@ class ChatMessage(Base):
     content = Column(Text, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)  # 对话所属项目（可为空）
+    trace = Column(Text, nullable=True)  # Agent 执行轨迹 JSON（步骤列表），仅 assistant 消息有
     created_at = Column(DateTime, server_default=func.now())
 
     user = relationship("User", back_populates="messages")

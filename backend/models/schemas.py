@@ -141,4 +141,5 @@ class ChatMessageOut(BaseModel):
     id: int
     role: str
     content: str
+    trace: Optional[list] = None  # 助手消息的 Agent 执行轨迹（工具步骤），由 DB JSON 文本解析而来
     created_at: Optional[datetime] = None

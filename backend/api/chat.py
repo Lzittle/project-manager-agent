@@ -2,7 +2,13 @@
 
 - POST /send      自然语言 -> Agent 工具循环 -> 回复；user/assistant 消息落库 chat_messages
 - GET  /history   该用户的对话历史（支持 ?project_id= 按项目隔离，供多项目场景下互不串扰）
+
+/send 响应附 trace：本次回复背后 Agent 实际执行的工具步骤（含受影响实体），
+供前端渲染「执行轨迹 + 可点击跳转的实体引用」。
 """
+import json
+import time
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -60,6 +66,7 @@ def chat_send(body: ChatRequest, db: Session = Depends(get_db)):
     #    这些不再交给 LLM 决策，从根上消除反问「给哪个项目」和跨项目串扰。
     agent = Agent(user_id=body.user_id, project_id=body.project_id)
     reply = None
+    trace: list[dict] = []
     if body.project_id is not None:
         action, payload = resolve_bound_action(
             db, body.user_id, body.project_id,
@@ -69,19 +76,27 @@ def chat_send(body: ChatRequest, db: Session = Depends(get_db)):
             reply = (f"当前对话已绑定「{bound_name}」，而你提到的是另一个项目「{payload}」。"
                      f"为避免任务建到错误项目，请先在页面上方切换到「{payload}」，"
                      f"或先取消绑定再对我说要规划哪个项目。")
+            trace = [{"tool": "guard", "label": "安全拦截",
+                      "detail": f"话术点名绑定项目之外的「{payload}」，已拦截并提示先切换（未写入任何数据）",
+                      "ok": True, "ms": 0}]
         elif action == "plan":
+            _t0 = time.time()
             res = agent.executor.plan_tasks()  # project_id 省略 → 落到绑定项目
+            _ms = int((time.time() - _t0) * 1000)
+            trace = [agent.executor.summarize_tool("plan_tasks", {}, res, _ms)]
             reply = _format_plan_reply(res, agent.executor.project_name)
 
-    # 3) 其余请求照旧走 Agent 工具循环
+    # 3) 其余请求照旧走 Agent 工具循环（dispatch 内部已记录执行轨迹）
     history = _load_history(db, body.user_id, body.project_id,
                             exclude_last_user_content=body.message)
     if reply is None:
         reply = agent.run(body.message, history=history)
+        trace = agent.executor.last_trace
 
-    # 4) 助手回复落库
+    # 4) 助手回复落库（附执行轨迹 JSON，供历史页回放）
     assistant_msg = ChatMessage(role="assistant", content=reply,
-                                user_id=body.user_id, project_id=body.project_id)
+                                user_id=body.user_id, project_id=body.project_id,
+                                trace=json.dumps(trace, ensure_ascii=False) if trace else None)
     db.add(assistant_msg)
     db.commit()
 
@@ -89,6 +104,7 @@ def chat_send(body: ChatRequest, db: Session = Depends(get_db)):
         "reply": reply,
         "message_id": assistant_msg.id,
         "project_id": body.project_id,
+        "trace": trace,
     }
 
 
@@ -99,4 +115,15 @@ def chat_history(user_id: int = Query(...),
     q = db.query(ChatMessage).filter_by(user_id=user_id)
     if project_id is not None:
         q = q.filter_by(project_id=project_id)
-    return q.order_by(ChatMessage.id.asc()).limit(100).all()
+    rows = q.order_by(ChatMessage.id.asc()).limit(100).all()
+    out = []
+    for m in rows:
+        trace = None
+        if m.trace:
+            try:
+                trace = json.loads(m.trace)
+            except json.JSONDecodeError:
+                trace = None
+        out.append(ChatMessageOut(id=m.id, role=m.role, content=m.content,
+                                  created_at=m.created_at, trace=trace))
+    return out
