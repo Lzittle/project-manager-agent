@@ -23,7 +23,8 @@ from services import project_service, task_service
 
 MAX_ITER = 8  # 单轮最多工具迭代次数，防死循环
 
-def build_system_prompt(project_id: Optional[int] = None) -> str:
+def build_system_prompt(project_id: Optional[int] = None,
+                        project_name: Optional[str] = None) -> str:
     prompt = """你是「项目管理 Agent」，帮用户用自然语言管理项目和任务，也能基于项目知识库文档回答问题。
 
 工具使用规则：
@@ -34,12 +35,86 @@ def build_system_prompt(project_id: Optional[int] = None) -> str:
 5. 只能依据工具返回的真实数据回答，不要编造项目或任务信息；
 6. 使用简体中文，回答简洁清晰。"""
     if project_id is not None:
+        name_desc = f"，名称「{project_name}」" if project_name else ""
         prompt += (
-            f"\n\n当前对话已绑定项目（project_id={project_id}）。"
-            f"除非用户明确说「创建/新建」一个新项目，否则禁止调用 create_project；"
-            f"谈及该项目的内容一律用 list_tasks / search_knowledge 查询，绝不重复创建同名项目。"
+            f"\n\n当前对话已绑定项目（project_id={project_id}{name_desc}）。"
+            f"你只能围绕这一个项目工作：加任务、查任务、改状态、检索资料、自动规划任务都会自动落到该项目，"
+            f"无需、也禁止向用户反问「要给哪个项目做」。"
+            f"本模式下工具列表已移除「列出项目 / 创建项目」入口——不要提及、罗列、猜测或编造其他任何项目，"
+            f"更不得使用其他项目的名字或任务内容作答。"
+            f"若用户明确要求新建项目，请提示「先在页面上方创建项目并切换过去」，不要假装已创建。"
         )
     return prompt
+
+
+# ---------- 确定性路由辅助（绑定项目时先于 LLM 决策，杜绝跨项目串扰） ----------
+_PLAN_HINT_WORDS = ("拆解", "分解", "帮我规划", "规划任务", "任务规划",
+                    "规划一下", "规划几个", "生成几个任务", "安排几个任务",
+                    "帮我生成任务", "帮我安排任务")
+# 出现在话术里多为「查询/检索知识库」而非「自动规划」，命中则不强制路由
+_PLAN_NOISE = ("文档", "资料", "知识库", "检索", "搜索", "找一下",
+               "查一下", "有什么", "有哪些", "怎么", "如何")
+
+
+def is_plan_intent(text: str) -> bool:
+    """判断是否「自动规划任务」意图（用户未给任务明细）。
+
+    仅用于绑定项目后的确定性路由：命中则直接对绑定项目执行 plan_tasks，
+    不再把「给哪个项目规划」交给 LLM 决策 —— 模型反问/编造由此在源头被掐断。
+    判定故意偏保守：普通问答、知识库检索类话术不会被误判成规划。
+    """
+    t = text.strip()
+    if any(w in t for w in _PLAN_NOISE):
+        return False
+    if any(w in t for w in _PLAN_HINT_WORDS):
+        return True
+    return bool(re.search(r"(?:生成|规划|安排)\S{0,6}任务", t))
+
+
+def find_project_mention(db, user_id: int, bound_project_id: int, text: str):
+    """若用户话术点到了绑定项目以外的项目 → 返回该项目（路由层拦截用）。
+
+    项目名可能被泛化使用（如项目叫「测试」而用户在闲聊「测试一下」），
+    因此这里只做「拦截提示、绝不写数据」，最坏情况是让用户先切换项目，安全。
+    """
+    for p in project_service.list_projects(db, user_id):
+        if p.id == bound_project_id:
+            continue
+        if p.name and len(p.name) >= 2 and p.name in text:
+            return p
+    return None
+
+
+# ---------- 绑定项目时的确定性路由（代码判定，先于 LLM 决策） ----------
+_TASK_ADD_HINT = re.compile(r"(?:加|建|创建|新增|添加|安排|补)\S{0,4}任务|任务[:：]")
+
+
+def _is_task_write_intent(text: str) -> bool:
+    """是否「要往某个项目写任务」：规划意图 或 显式「加/建任务」指令。"""
+    return is_plan_intent(text) or bool(_TASK_ADD_HINT.search(text))
+
+
+def resolve_bound_action(db, user_id: int, bound_project_id: Optional[int],
+                         bound_project_name: Optional[str], message: str):
+    """绑定项目场景下，把「高确定性」的情况在进入 LLM 前先用代码判定：
+
+    返回 (action, payload)：
+      ("conflict", other_name)  消息要写任务却点名绑定项目之外的项目
+                                → 提示先切换，绝不跨项目写数据；
+      ("plan",      None)       纯规划意图 → 直接对绑定项目执行 plan_tasks；
+      ("agent",     None)       其余 → 交给 Agent 工具循环（工具已按绑定项目裁剪）。
+
+    说明：仅「提及别的项目」（如“参照A项目的做法”）不拦截，交给裁剪后的
+    Agent —— 工具里已无 project_id，它也无法把数据写到别的项目。
+    """
+    if bound_project_id is None:
+        return ("agent", None)
+    other = find_project_mention(db, user_id, bound_project_id, message)
+    if other is not None and _is_task_write_intent(message):
+        return ("conflict", other.name)
+    if is_plan_intent(message):
+        return ("plan", None)
+    return ("agent", None)
 
 
 # ---------- 工具定义 ----------
@@ -74,19 +149,21 @@ TOOLS: list[dict] = [
     ),
     _fn(
         "list_tasks",
-        "列出指定项目下的任务。用于用户问「XX 项目的任务有哪些/任务列表」",
-        {"project_id": {"type": "integer", "description": "项目 id"}},
-        ["project_id"],
+        "列出指定项目下的任务。用于用户问「XX 项目的任务有哪些/任务列表」。"
+        "project_id 可省略：省略时默认当前绑定的项目（若未绑定则必须提供）",
+        {"project_id": {"type": "integer", "description": "项目 id（可省略，默认当前绑定项目）"}},
+        [],
     ),
     _fn(
         "create_task",
-        "在指定项目下创建一个任务。用于「在 XX 项目加一个任务/任务：YY」",
-        {"project_id": {"type": "integer", "description": "所属项目 id"},
+        "在指定项目下创建一个任务。用于「在 XX 项目加一个任务/任务：YY」。"
+        "project_id 可省略：省略时默认创建到当前绑定的项目（若未绑定则必须提供）",
+        {"project_id": {"type": "integer", "description": "所属项目 id（可省略，默认当前绑定项目）"},
          "title": {"type": "string", "description": "任务标题"},
          "description": {"type": "string", "description": "任务描述（可空）"},
          "status": {"type": "string", "enum": ["todo", "doing", "done"], "description": "状态，默认 todo"},
          "priority": {"type": "string", "enum": ["high", "medium", "low"], "description": "优先级，默认 medium"}},
-        ["project_id", "title"],
+        ["title"],
     ),
     _fn(
         "update_task_status",
@@ -105,12 +182,45 @@ TOOLS: list[dict] = [
     _fn(
         "plan_tasks",
         "为指定项目自动规划一组任务：根据项目主题调用大模型生成约 5 条落地任务并创建入库（首个任务置为进行中）。"
-        "用于用户说「规划任务/拆解任务/自动生成 N 个任务/包含几个任务」但未给出具体任务清单时；若用户已列出任务明细，直接用 create_task 逐个创建",
-        {"project_id": {"type": "integer", "description": "要规划任务的项目 id"},
-         "goal": {"type": "string", "description": "规划目标/主题（可空，缺省用项目名）"}},
-        ["project_id"],
+        "用于用户说「规划任务/拆解任务/自动生成 N 个任务/包含几个任务」但未给出具体任务清单时；若用户已列出任务明细，直接用 create_task 逐个创建。"
+        "project_id 可省略：省略时默认当前绑定的项目（若未绑定则必须提供）",
+        {"project_id": {"type": "integer", "description": "要规划任务的项目 id（可省略，默认当前绑定项目）"}},
+        [],
     ),
 ]
+
+
+def build_tools(project_id: Optional[int] = None) -> list[dict]:
+    """按会话状态裁剪工具列表。
+
+    - 未绑定项目：暴露全部 7 个工具（模型可自由创建/查询项目）；
+    - 已绑定项目：摘掉 list_projects / create_project，并移除项目类工具里的
+      project_id 参数 —— 模型既看不到「还有别的项目」、也无法传错项目，
+      所有落点由执行器固定为绑定项目。反问「要给哪个项目」从此无从发生。
+    """
+    if project_id is None:
+        return TOOLS
+    HIDDEN = {"list_projects", "create_project"}
+    trimmed = []
+    for t in TOOLS:
+        name = t["function"]["name"]
+        if name in HIDDEN:
+            continue
+        # 浅拷贝参数结构，避免污染全局 TOOLS
+        props = dict(t["function"]["parameters"]["properties"])
+        required = [r for r in t["function"]["parameters"].get("required", [])
+                    if r != "project_id"]
+        props.pop("project_id", None)
+        trimmed.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": t["function"]["description"],
+                "parameters": {"type": "object", "properties": props,
+                               "required": required},
+            },
+        })
+    return trimmed
 
 
 # ---------- 工具执行（业务逻辑经 services 层，user_id 由会话注入不暴露给模型） ----------
@@ -118,6 +228,15 @@ class _ToolExecutor:
     def __init__(self, user_id: int, project_id: Optional[int] = None):
         self.user_id = user_id
         self.project_id = project_id
+        # 缓存绑定项目名：注入 system prompt，防止模型引用错项目名
+        self.project_name: Optional[str] = None
+        if project_id is not None:
+            db = SessionLocal()
+            try:
+                p = db.get(Project, project_id)
+                self.project_name = p.name if p else None
+            finally:
+                db.close()
 
     def _project_brief(self, p) -> dict:
         return {"id": p.id, "name": p.name, "description": p.description,
@@ -144,25 +263,33 @@ class _ToolExecutor:
         finally:
             db.close()
 
-    def list_tasks(self, project_id: int) -> dict:
+    def list_tasks(self, project_id: Optional[int] = None) -> dict:
+        pid = project_id or self.project_id
+        if pid is None:
+            return {"ok": False, "error": "未指定项目：请先绑定项目或在话术中说明项目名称"}
         db = SessionLocal()
         try:
-            data = [self._task_brief(t) for t in task_service.list_tasks(db, project_id)]
+            data = [self._task_brief(t) for t in task_service.list_tasks(db, pid)]
             return {"ok": True, "data": data}
         finally:
             db.close()
 
-    def create_task(self, project_id: int, title: str, description: str = "",
-                    status: str = "todo", priority: str = "medium") -> dict:
+    def create_task(self, project_id: Optional[int] = None, title: str = "",
+                    description: str = "", status: str = "todo",
+                    priority: str = "medium") -> dict:
+        # project_id 未提供时回落到当前绑定项目
+        pid = project_id or self.project_id
+        if pid is None:
+            return {"ok": False, "error": "未指定项目：请先绑定项目或在话术中说明项目名称"}
         db = SessionLocal()
         try:
             t = task_service.create_task(
-                db, project_id, self.user_id, title,
+                db, pid, self.user_id, title,
                 description=description, status=status, priority=priority)
             if t is None:
-                return {"ok": False, "error": f"项目 {project_id} 不存在"}
+                return {"ok": False, "error": f"项目 {pid} 不存在"}
             return {"ok": True, "data": {"id": t.id, "title": t.title,
-                                         "project_id": project_id, "status": t.status}}
+                                         "project_id": pid, "status": t.status}}
         finally:
             db.close()
 
@@ -212,14 +339,21 @@ class _ToolExecutor:
                 })
         return out
 
-    def plan_tasks(self, project_id: int, goal: str = "") -> dict:
-        # 1) 项目校验 + 确定主题
+    def plan_tasks(self, project_id: Optional[int] = None, goal: str = "") -> dict:
+        """自动规划任务。主题一律取项目自身名称，不接受模型传入的 goal，
+        避免模型受历史话术误导、给别的主题生成任务。"""
+        # project_id 未提供时回落到当前绑定项目
+        pid = project_id or self.project_id
+        if pid is None:
+            return {"ok": False, "error": "未指定项目：请先绑定项目或在话术中说明项目名称"}
+
+        # 1) 项目校验 + 确定主题（以项目名称为准）
         db = SessionLocal()
         try:
-            p = db.get(Project, project_id)
+            p = db.get(Project, pid)
             if p is None:
-                return {"ok": False, "error": f"项目 {project_id} 不存在"}
-            topic = (goal or f"{p.name} 项目").strip()
+                return {"ok": False, "error": f"项目 {pid} 不存在"}
+            topic = f"{p.name} 项目"
         finally:
             db.close()
 
@@ -245,7 +379,7 @@ class _ToolExecutor:
             created = []
             for t in tasks[:6]:
                 tk = task_service.create_task(
-                    db, project_id, self.user_id, t["title"],
+                    db, pid, self.user_id, t["title"],
                     description=t["description"], priority=t["priority"], status="todo")
                 if tk:
                     created.append(tk)
@@ -276,13 +410,16 @@ class Agent:
 
     def run(self, message: str, history: Optional[list[dict]] = None) -> str:
         """执行一轮对话。history: 此前 {role: user/assistant, content} 列表（不含工具消息）。"""
-        messages: list[dict[str, Any]] = [{"role": "system", "content": build_system_prompt(self.executor.project_id)}]
+        messages: list[dict[str, Any]] = [{
+            "role": "system",
+            "content": build_system_prompt(self.executor.project_id, self.executor.project_name),
+        }]
         for h in history or []:
             messages.append({"role": h["role"], "content": h["content"]})
         messages.append({"role": "user", "content": message})
 
         for _ in range(MAX_ITER):
-            resp = llm.chat(messages, tools=TOOLS)
+            resp = llm.chat(messages, tools=build_tools(self.executor.project_id))
             msg = resp.choices[0].message
             tool_calls = getattr(msg, "tool_calls", None)
             if not tool_calls:

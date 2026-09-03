@@ -151,3 +151,84 @@ def test_chat_send_and_history(client, monkeypatch):
     history = client.get("/api/chat/history?user_id=1").json()
     roles = [m["role"] for m in history]
     assert roles[-2:] == ["user", "assistant"]
+
+
+def test_chat_history_project_isolation(client, monkeypatch):
+    """回归：绑定不同项目对话，历史必须按项目隔离，不得互相串扰。"""
+    from types import SimpleNamespace
+
+    def fake_chat(messages, tools=None, **kwargs):
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(content="模拟回复", tool_calls=None))
+        ])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+
+    pa = _new_project(client, "隔离项目A")
+    pb = _new_project(client, "隔离项目B")
+
+    for pid, msg in [(pa["id"], "A 项目的问题"), (pb["id"], "B 项目的问题")]:
+        r = client.post("/api/chat/send", json={"message": msg, "user_id": 1, "project_id": pid})
+        assert r.status_code == 200
+
+    # A 项目历史只含 A 的消息（user+assistant 各一条）
+    ha = client.get(f"/api/chat/history?user_id=1&project_id={pa['id']}").json()
+    assert [m["content"] for m in ha] == ["A 项目的问题", "模拟回复"]
+
+    # B 项目历史只含 B 的消息
+    hb = client.get(f"/api/chat/history?user_id=1&project_id={pb['id']}").json()
+    assert [m["content"] for m in hb] == ["B 项目的问题", "模拟回复"]
+
+    # 未绑定（全部）应同时含两者
+    hall = client.get("/api/chat/history?user_id=1").json()
+    contents = [m["content"] for m in hall]
+    assert "A 项目的问题" in contents and "B 项目的问题" in contents
+
+
+# ---------- 绑定项目下的确定性路由（规划直行 / 跨项目拦截） ----------
+
+def test_chat_bound_plan_goes_to_bound_project(client, monkeypatch):
+    """回归：绑定项目时说「帮我规划几个任务」，任务必须 100% 落在绑定项目，
+    不再反问/串扰（plan_tasks 内部的 LLM 只负责生成任务清单，落点由代码锁定）。"""
+    from types import SimpleNamespace
+
+    def fake_chat_text(messages, **kwargs):
+        assert any(m["role"] == "user" for m in messages)
+        return ('[{"title":"规划任务甲","description":"desc","priority":"high"},'
+                '{"title":"规划任务乙","description":"desc","priority":"medium"}]')
+
+    monkeypatch.setattr("core.llm.chat_text", fake_chat_text)
+
+    pa = _new_project(client, "路由A项目")
+    pb = _new_project(client, "路由B项目")
+
+    r = client.post("/api/chat/send",
+                    json={"message": "帮我规划几个任务", "user_id": 1, "project_id": pb["id"]})
+    assert r.status_code == 200
+    reply = r.json()["reply"]
+    assert "路由B项目" in reply and "规划任务甲" in reply
+
+    # 任务落在绑定项目 B，A 不受影响
+    tb = client.get(f"/api/tasks?project_id={pb['id']}").json()
+    ta = client.get(f"/api/tasks?project_id={pa['id']}").json()
+    assert {t["title"] for t in tb} == {"规划任务甲", "规划任务乙"}
+    assert any(t["status"] == "doing" for t in tb)  # 首个任务置为进行中
+    assert ta == []
+
+
+def test_chat_bound_blocks_other_project_plan(client, monkeypatch):
+    """回归：绑定 A 却说「给 B 规划任务」→ 必须拦截并提示先切换，绝不在 A 下建任务。"""
+    pa = _new_project(client, "绑定A项目")
+    pb = _new_project(client, "绑定B项目")
+
+    r = client.post("/api/chat/send",
+                    json={"message": f"帮「{pb['name']}」规划几个任务", "user_id": 1,
+                          "project_id": pa["id"]})
+    assert r.status_code == 200
+    reply = r.json()["reply"]
+    assert "切换" in reply and pb["name"] in reply
+    assert "已为" not in reply  # 未触发规划
+
+    # 两个项目都不应有新任务
+    assert client.get(f"/api/tasks?project_id={pa['id']}").json() == []
+    assert client.get(f"/api/tasks?project_id={pb['id']}").json() == []
