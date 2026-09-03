@@ -30,6 +30,7 @@ export const useProjectStore = defineStore('project', {
     async create(name, description) {
       await projectApi.create({ name, description })
       await this.load()
+      return this.projects
     },
     async remove(id) {
       await projectApi.remove(id)
