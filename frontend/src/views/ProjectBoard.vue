@@ -179,10 +179,10 @@ async function submitProject() {
   if (!projDlg.name.trim()) return ElMessage.warning('请输入项目名称')
   projDlg.submitting = true
   try {
-    const list = await store.create(projDlg.name.trim(), projDlg.description)
+    const list = (await store.create(projDlg.name.trim(), projDlg.description)) || []
     projDlg.visible = false
     const created = list.find((p) => p.name === projDlg.name.trim())
-    store.setCurrent(created?.id || list[0]?.id)
+    store.setCurrent(created?.id ?? list[0]?.id ?? store.currentId)
     ElMessage.success('项目已创建')
     await loadTasks()
   } catch (e) { ElMessage.error(e.message) }
