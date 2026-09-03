@@ -65,8 +65,13 @@ flowchart LR
 cd backend
 cp .env.example .env        # 填写 OPENAI_API_KEY / OPENAI_BASE_URL / LLM_MODEL
 pip install -r requirements.txt
-python seed.py              # 可选：生成演示数据（1 用户 / 2 项目 / 8 任务 / 1 篇知识库文档）
+python seed.py              # 可选：生成演示数据（1 用户 / 2 项目 / 8 任务 / 1 篇知识库文档，自动向量化）
 uvicorn main:app --reload   # http://127.0.0.1:8000  （Swagger 文档 /docs）
+```
+
+运行自动化测试（可选，`pip install -r requirements-dev.txt` 后执行；LLM 已 mock，离线可跑不耗 token）：
+```bash
+python -m pytest tests/ -v    # 6 个用例：CRUD / 状态流转 / 级联删除 / 上传检索 / 对话链路
 ```
 
 ### 2. 前端启动
@@ -139,4 +144,6 @@ project-manager-agent/
 
 - [x] P1 后端核心：LLM 调用 / 数据层 / 向量库 RAG / 业务 API / Agent 链路（端到端验收通过）
 - [x] P2 前端：仪表盘 / 看板拖拽 / AI 对话 / 知识库管理（与后端联调通过）
-- [ ] P3 打磨：部署上线可访问 Demo / 按需引入优化 / 单测补充
+- [x] Agent 增强：任务自动规划（plan_tasks）、防误建同名项目护栏、多轮上下文（最近 20 条）
+- [x] 工程质量：后端 pytest API 冒烟测试 6 用例（离线 mock LLM，`python -m pytest tests/ -v`）
+- [ ] P3 打磨：部署上线可访问 Demo / Element Plus 按需引入优化
