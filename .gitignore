@@ -1,0 +1,29 @@
+# python虚拟环境
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 密钥！严禁提交
+backend/.env
+backend/.env.*
+
+# 数据库、向量库
+backend/*.db
+backend/*.db-journal
+backend/chroma_db/
+
+#前端
+frontend/node_modules/
+frontend/.nuxt
+frontend/dist
+frontend/.output
+
+#日志、IDE
+*.log
+.vscode/
+.cursor/
+*.swp
+*.swo
+.DS_Store
