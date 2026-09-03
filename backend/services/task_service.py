@@ -56,14 +56,16 @@ def update_task(db: Session, task_id: int, **fields) -> Optional[Task]:
     return t
 
 
-def delete_task(db: Session, task_id: int) -> Optional[Task]:
+def delete_task(db: Session, task_id: int) -> Optional[dict]:
+    """删除任务（级联删除评论）。返回删除前快照 dict；commit 后 ORM 对象已失效不可读。"""
     t = db.get(Task, task_id)
     if t is None:
         return None
+    snapshot = {"id": t.id, "title": t.title, "status": t.status, "project_id": t.project_id}
     db.query(TaskComment).filter_by(task_id=task_id).delete(synchronize_session=False)
     db.delete(t)
     db.commit()
-    return t
+    return snapshot
 
 
 # ---------- 任务评论 ----------

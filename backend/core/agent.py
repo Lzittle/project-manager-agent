@@ -40,7 +40,12 @@ def build_system_prompt(project_id: Optional[int] = None,
 3. 用户问题涉及项目资料（需求、方案、验收标准、模块功能等）时调用 search_knowledge 检索相关文档后再回答；
 4. 纯闲聊、问候、与项目无关的内容直接回答，不要调用工具；
 5. 只能依据工具返回的真实数据回答，不要编造项目或任务信息；
-6. 使用简体中文，回答简洁清晰。"""
+6. 使用简体中文，回答简洁清晰。
+7. 说法千变万化，一律映射到工具，禁止回复「做不到」：
+   - 删除/移除/清理/划掉任务 → delete_task；删除/移除项目 → delete_project；
+   - 改标题/改描述/优化/调优先级/改名 → update_task_fields / update_project_fields；
+   - 执行删除/修改前先用 list_tasks/list_projects 查到真实 id，对象不明确就先列出来问用户，绝不猜 id；
+   - 用户只说「加 N 个任务」却没给内容时，先请用户补充内容，绝不自动规划一整套。"""
     if project_id is not None:
         name_desc = f"，名称「{project_name}」" if project_name else ""
         prompt += (
@@ -94,6 +99,9 @@ def find_project_mention(db, user_id: int, bound_project_id: int, text: str):
 
 # ---------- 绑定项目时的确定性路由（代码判定，先于 LLM 决策） ----------
 _TASK_ADD_HINT = re.compile(r"(?:加|建|创建|新增|添加|安排|补)\S{0,4}任务|任务[:：]")
+# 删除类写意图：覆盖「删掉XX任务/删除XX项目的任务/把XX任务删掉/清掉XX」
+_TASK_DEL_HINT = re.compile(
+    r"(?:删|删除|移除|清理|划掉|去掉)\S{0,12}(?:任务|项目)|(?:任务|项目)\S{0,8}(?:删|删除|划掉|移除)")
 # 出现「数量 + 个任务」（如：加两个任务 / 增加 3 个任务 / 加几个任务）
 _COUNT_TASK = re.compile(r"(?:[0-9]+|[一二两三四五六七八九十]|两|几|多)\s*个\s*任务")
 # 已给出任务明细的特征（引号包裹 或 「任务：」冒号后跟内容）
@@ -101,8 +109,10 @@ _DETAIL_MARK = re.compile(r"[「『【]|任务\s*[:：]")
 
 
 def _is_task_write_intent(text: str) -> bool:
-    """是否「要往某个项目写任务」：规划意图 或 显式「加/建任务」指令。"""
-    return is_plan_intent(text) or bool(_TASK_ADD_HINT.search(text))
+    """是否「要往某个项目写任务」：规划意图 / 显式「加/建任务」/ 删除任务指令。"""
+    return (is_plan_intent(text)
+            or bool(_TASK_ADD_HINT.search(text))
+            or bool(_TASK_DEL_HINT.search(text)))
 
 
 def is_ask_detail_intent(text: str) -> bool:
@@ -205,6 +215,39 @@ TOOLS: list[dict] = [
         ["task_id", "status"],
     ),
     _fn(
+        "delete_task",
+        "删除一个任务（会级联删除其评论）。用于「删掉/删除/移除/清理/划掉 XX 任务」。"
+        "只传 task_id（可用 list_tasks 先查到）",
+        {"task_id": {"type": "integer", "description": "要删除的任务 id"}},
+        ["task_id"],
+    ),
+    _fn(
+        "update_task_fields",
+        "编辑任务字段：改标题/改描述/调优先级/改状态，可只传要改的字段。"
+        "用于「把 XX 任务改成 YY/改名为 YY」「优化 XX 任务描述」「把 XX 调成高优先级」",
+        {"task_id": {"type": "integer", "description": "任务 id"},
+         "title": {"type": "string", "description": "新标题（可选）"},
+         "description": {"type": "string", "description": "新描述（可选）"},
+         "status": {"type": "string", "enum": ["todo", "doing", "done"], "description": "新状态（可选）"},
+         "priority": {"type": "string", "enum": ["high", "medium", "low"], "description": "新优先级（可选）"}},
+        ["task_id"],
+    ),
+    _fn(
+        "delete_project",
+        "删除一个项目（级联删除其任务/评论/文档与知识向量，不可恢复）。"
+        "用于「删除/移除 XX 项目」。只传 project_id（可用 list_projects 先查到）",
+        {"project_id": {"type": "integer", "description": "要删除的项目 id"}},
+        ["project_id"],
+    ),
+    _fn(
+        "update_project_fields",
+        "编辑项目名称/描述。用于「把 XX 项目改名为 YY」「修改 XX 项目描述」",
+        {"project_id": {"type": "integer", "description": "项目 id"},
+         "name": {"type": "string", "description": "新项目名（可选）"},
+         "description": {"type": "string", "description": "新描述（可选）"}},
+        ["project_id"],
+    ),
+    _fn(
         "search_knowledge",
         "在项目知识库中检索文档片段（RAG），回答与项目资料相关的问题。如果用户问的与某个项目绑定就传 project_id",
         {"query": {"type": "string", "description": "检索问题"},
@@ -213,8 +256,8 @@ TOOLS: list[dict] = [
     ),
     _fn(
         "plan_tasks",
-        "为指定项目自动规划一组任务：根据项目主题调用大模型生成约 5 条落地任务并创建入库（首个任务置为进行中）。"
-        "用于用户说「规划任务/拆解任务/自动生成 N 个任务/包含几个任务」但未给出具体任务清单时；若用户已列出任务明细，直接用 create_task 逐个创建。"
+        "为指定项目自动规划一组任务：根据项目主题调用大模型生成约 5 条落地任务并创建入库（统一默认待办）。"
+        "仅用于「按主题拆解整套任务」；若用户明确给了任务数量+明细（如加 2 个任务：A/B），必须用 create_task 逐个创建，禁止误用本工具。"
         "project_id 可省略：省略时默认当前绑定的项目（若未绑定则必须提供）",
         {"project_id": {"type": "integer", "description": "要规划任务的项目 id（可省略，默认当前绑定项目）"}},
         [],
@@ -232,7 +275,8 @@ def build_tools(project_id: Optional[int] = None) -> list[dict]:
     """
     if project_id is None:
         return TOOLS
-    HIDDEN = {"list_projects", "create_project"}
+    # 绑定模式：禁止项目级新建/删除/改名，避免模型跨项目动数据；任务级删除/编辑按 id 操作可保留
+    HIDDEN = {"list_projects", "create_project", "delete_project", "update_project_fields"}
     trimmed = []
     for t in TOOLS:
         name = t["function"]["name"]
@@ -338,6 +382,84 @@ class _ToolExecutor:
         finally:
             db.close()
 
+    def delete_task(self, task_id: int) -> dict:
+        """删除任务（级联删除评论）。"""
+        db = SessionLocal()
+        try:
+            snap = task_service.delete_task(db, task_id)
+            if snap is None:
+                return {"ok": False, "error": f"任务 {task_id} 不存在"}
+            return {"ok": True, "data": {"id": snap["id"], "title": snap["title"],
+                                         "project_id": snap["project_id"]}}
+        finally:
+            db.close()
+
+    def delete_project(self, project_id: int) -> dict:
+        """删除项目（级联任务/评论/文档与向量）。"""
+        db = SessionLocal()
+        try:
+            snap = project_service.delete_project(db, project_id)
+            if snap is None:
+                return {"ok": False, "error": f"项目 {project_id} 不存在"}
+            return {"ok": True, "data": {"id": snap["id"], "name": snap["name"],
+                                         "status": snap["status"]}}
+        finally:
+            db.close()
+
+    def update_task_fields(self, task_id: int, title: Optional[str] = None,
+                           description: Optional[str] = None,
+                           status: Optional[str] = None,
+                           priority: Optional[str] = None) -> dict:
+        """更新任务的标题/描述/状态/优先级（只更新调用方提供的字段）。"""
+        fields: dict[str, str] = {}
+        if title is not None:
+            if not str(title).strip():
+                return {"ok": False, "error": "任务标题不能为空"}
+            fields["title"] = str(title).strip()[:200]
+        if description is not None:
+            fields["description"] = str(description).strip()[:500]
+        if status is not None:
+            if status not in ("todo", "doing", "done"):
+                return {"ok": False, "error": f"非法状态 {status}（todo/doing/done）"}
+            fields["status"] = status
+        if priority is not None:
+            if priority not in ("high", "medium", "low"):
+                return {"ok": False, "error": f"非法优先级 {priority}（high/medium/low）"}
+            fields["priority"] = priority
+        if not fields:
+            return {"ok": False, "error": "未提供任何要更新的字段（title/description/status/priority）"}
+        db = SessionLocal()
+        try:
+            t = task_service.update_task(db, task_id, **fields)
+            if t is None:
+                return {"ok": False, "error": f"任务 {task_id} 不存在"}
+            return {"ok": True, "data": {"id": t.id, "title": t.title, "status": t.status,
+                                         "priority": t.priority, "project_id": t.project_id}}
+        finally:
+            db.close()
+
+    def update_project_fields(self, project_id: int, name: Optional[str] = None,
+                              description: Optional[str] = None) -> dict:
+        """更新项目的名称/描述。"""
+        fields: dict[str, str] = {}
+        if name is not None:
+            if not str(name).strip():
+                return {"ok": False, "error": "项目名称不能为空"}
+            fields["name"] = str(name).strip()[:100]
+        if description is not None:
+            fields["description"] = str(description).strip()[:500]
+        if not fields:
+            return {"ok": False, "error": "未提供任何要更新的字段（name/description）"}
+        db = SessionLocal()
+        try:
+            p = project_service.update_project(db, project_id, **fields)
+            if p is None:
+                return {"ok": False, "error": f"项目 {project_id} 不存在"}
+            return {"ok": True, "data": {"id": p.id, "name": p.name,
+                                         "description": p.description, "status": p.status}}
+        finally:
+            db.close()
+
     def search_knowledge(self, query: str, project_id: Optional[int] = None) -> dict:
         pid = project_id or self.project_id
         try:
@@ -356,15 +478,20 @@ class _ToolExecutor:
         "list_tasks": "查看任务", "create_task": "创建任务",
         "update_task_status": "更新任务状态", "search_knowledge": "检索知识库",
         "plan_tasks": "自动规划任务",
+        "delete_task": "删除任务", "delete_project": "删除项目",
+        "update_task_fields": "编辑任务", "update_project_fields": "编辑项目",
     }
+    _TASK_TOOLS = {"create_task", "update_task_status", "delete_task", "update_task_fields"}
+    _PROJECT_TOOLS = {"create_project", "delete_project", "update_project_fields"}
 
     def _refs_from(self, name: str, args: dict, result: dict) -> list[dict]:
         """提取受影响的实体（任务/项目），供前端渲染可点击跳转的引用。"""
         data = result.get("data") if result.get("ok") else None
         refs = []
-        if name == "create_project" and isinstance(data, dict):
-            refs.append({"kind": "project", "id": data["id"], "title": data.get("name", "")})
-        elif name in ("create_task", "update_task_status") and isinstance(data, dict):
+        if name in self._PROJECT_TOOLS and isinstance(data, dict):
+            refs.append({"kind": "project", "id": data["id"],
+                         "title": data.get("name") or data.get("title", "")})
+        elif name in self._TASK_TOOLS and isinstance(data, dict):
             refs.append({"kind": "task", "id": data["id"], "title": data.get("title", ""),
                          "project_id": data.get("project_id")})
         elif name == "plan_tasks" and isinstance(data, list):
@@ -384,10 +511,22 @@ class _ToolExecutor:
         data = result.get("data")
         if name == "create_project" and isinstance(data, dict):
             detail = f"创建项目「{data.get('name','')}」（#{data['id']}）"
+        elif name == "delete_project" and isinstance(data, dict):
+            detail = f"删除项目「{data.get('name','')}」（#{data['id']}）"
+        elif name == "update_project_fields" and isinstance(data, dict):
+            changed = [k for k in ("name", "description")
+                       if k in args and args[k] not in (None, "")]
+            detail = f"项目「{data.get('name','')}」已更新（{'/'.join(changed) or '描述'}）"
         elif name == "create_task" and isinstance(data, dict):
             detail = f"创建任务「{data.get('title','')}」（#{data['id']}）"
+        elif name == "delete_task" and isinstance(data, dict):
+            detail = f"删除任务「{data.get('title','')}」（#{data['id']}）"
         elif name == "update_task_status" and isinstance(data, dict):
             detail = f"任务「{data.get('title','')}」状态 → {data.get('status','')}"
+        elif name == "update_task_fields" and isinstance(data, dict):
+            changed = [k for k in ("title", "description", "status", "priority")
+                       if k in args and args[k] not in (None, "")]
+            detail = f"任务「{data.get('title','')}」已更新（{'/'.join(changed) or '字段'}）"
         elif name == "plan_tasks" and isinstance(data, list):
             detail = f"生成 {len(data)} 条任务并入库（默认待办）"
         elif name == "list_projects" and isinstance(data, list):

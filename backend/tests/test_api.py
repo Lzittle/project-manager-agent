@@ -1,4 +1,6 @@
 """后端 API 冒烟测试（离线可跑：LLM 调用用 monkeypatch mock，不消耗 token/不依赖网络）。"""
+import json
+
 import pytest
 
 # ---------- 工具函数 ----------
@@ -371,3 +373,87 @@ def test_chat_task_add_with_details_still_creates(client, monkeypatch):
     assert r.status_code == 200
     tasks = client.get(f"/api/tasks?project_id={pa['id']}").json()
     assert len(tasks) == 1  # mock 只建 1 条（明细路径未被 ask 拦截）
+
+
+# ---------- 删除/编辑能力（delete_task / update_task_fields / delete_project） ----------
+
+def _mock_tool_chat(monkeypatch, first_tool, first_args, final_text="完成"):
+    """打桩 LLM：第一次返回指定工具调用，第二次返回收尾文本。"""
+    from types import SimpleNamespace
+
+    calls = {"n": 0}
+
+    def fake_chat(messages, tools=None, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            tc = SimpleNamespace(
+                id="call_1", type="function",
+                function=SimpleNamespace(name=first_tool,
+                                         arguments=json.dumps(first_args, ensure_ascii=False)))
+            return SimpleNamespace(choices=[
+                SimpleNamespace(message=SimpleNamespace(content=None, tool_calls=[tc]))])
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(content=final_text, tool_calls=None))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+    return calls
+
+
+def test_chat_delete_task_tool(client, monkeypatch):
+    """说「删掉任务」→ 模型调 delete_task，任务真正删除且轨迹/引用正常。"""
+    import json
+    p = _new_project(client, "删除工具项目")
+    t = _new_task(client, p["id"], "待删除任务")
+    _mock_tool_chat(monkeypatch, "delete_task", {"task_id": t["id"]}, "已删除")
+
+    r = client.post("/api/chat/send", json={"message": "删掉那个任务", "user_id": 1})
+    assert r.status_code == 200
+    steps = r.json()["trace"]
+    assert any(s["tool"] == "delete_task" and s["ok"] for s in steps)
+    # 任务确实已删除
+    assert client.get(f"/api/tasks/{t['id']}").status_code == 404
+
+
+def test_chat_update_task_fields_tool(client, monkeypatch):
+    """说「把任务调成高优先级」→ update_task_fields 只更新目标字段。"""
+    import json
+    p = _new_project(client, "编辑工具项目")
+    t = _new_task(client, p["id"], "待调级任务")
+    _mock_tool_chat(monkeypatch, "update_task_fields",
+                    {"task_id": t["id"], "priority": "high"}, "已调为高优先级")
+
+    r = client.post("/api/chat/send", json={"message": "把这个任务调成高优先级", "user_id": 1})
+    assert r.status_code == 200
+    steps = r.json()["trace"]
+    assert any(s["tool"] == "update_task_fields" and s["ok"] for s in steps)
+    got = client.get(f"/api/tasks/{t['id']}").json()
+    assert got["priority"] == "high"
+
+
+def test_chat_delete_project_tool(client, monkeypatch):
+    """说「删除 XX 项目」→ delete_project 级联删除。"""
+    import json
+    p = _new_project(client, "待删项目")
+    _mock_tool_chat(monkeypatch, "delete_project", {"project_id": p["id"]}, "已删除")
+
+    r = client.post("/api/chat/send", json={"message": "删除该项目", "user_id": 1})
+    assert r.status_code == 200
+    steps = r.json()["trace"]
+    assert any(s["tool"] == "delete_project" and s["ok"] for s in steps)
+    assert client.get(f"/api/projects/{p['id']}").status_code == 404
+
+
+def test_chat_bound_conflict_on_delete_other_project(client):
+    """绑定 A 却说「删 B 的任务」→ 拦截，两个项目都不动。"""
+    pa = _new_project(client, "删除拦截A")
+    pb = _new_project(client, "删除拦截B")
+    tb = _new_task(client, pb["id"], "B项目任务")
+
+    r = client.post("/api/chat/send",
+                    json={"message": f"把「{pb['name']}」的项目任务删掉", "user_id": 1,
+                          "project_id": pa["id"]})
+    assert r.status_code == 200
+    assert "切换" in r.json()["reply"]
+    assert r.json()["trace"][0]["tool"] == "guard"
+    # B 的任务还在
+    assert client.get(f"/api/tasks/{tb['id']}").status_code == 200

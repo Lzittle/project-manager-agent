@@ -43,11 +43,13 @@ def update_project(db: Session, project_id: int, **fields) -> Optional[Project]:
     return p
 
 
-def delete_project(db: Session, project_id: int) -> Optional[Project]:
-    """删除项目及其全部从属数据（任务/评论/文档），文档向量同步清理。"""
+def delete_project(db: Session, project_id: int) -> Optional[dict]:
+    """删除项目及其全部从属数据（任务/评论/文档），文档向量同步清理。
+    返回删除前快照 dict；commit 后 ORM 对象已失效不可读。"""
     p = db.get(Project, project_id)
     if p is None:
         return None
+    snapshot = {"id": p.id, "name": p.name, "description": p.description, "status": p.status}
 
     # 1) 文档及其向量
     for doc in db.query(KnowledgeDocument).filter_by(project_id=project_id).all():
@@ -64,4 +66,4 @@ def delete_project(db: Session, project_id: int) -> Optional[Project]:
     # 3) 项目本身
     db.delete(p)
     db.commit()
-    return p
+    return snapshot
