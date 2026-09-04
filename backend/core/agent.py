@@ -547,7 +547,12 @@ class _ToolExecutor:
     # ---------- 任务自动规划（plan_tasks 工具） ----------
     @staticmethod
     def _parse_tasks(raw: str) -> list[dict]:
-        """从模型输出中提取任务 JSON 数组（容忍 ```json 围栏与多余文字）。"""
+        """从模型输出中提取任务 JSON 数组（容忍 ```json 围栏与多余文字）。
+
+        规划期任务尚无数据库 id，依赖用「数组下标」逻辑引用：
+        {"title":"联调","depends_on":[1]} 表示联调依赖下标 1 的任务。
+        落库阶段（plan_tasks）会按下标映射回真实任务 id 建依赖边。
+        """
         text = raw.strip()
         m = re.search(r"\[[\s\S]*\]", text)
         if not m:
@@ -561,10 +566,19 @@ class _ToolExecutor:
         out = []
         for item in data:
             if isinstance(item, dict) and item.get("title"):
+                deps = item.get("depends_on")
+                dep_idx = []
+                if isinstance(deps, list):
+                    for d in deps:
+                        if isinstance(d, (int, float)) and not isinstance(d, bool):
+                            dep_idx.append(int(d))
+                        elif isinstance(d, str) and d.isdigit():
+                            dep_idx.append(int(d))
                 out.append({
                     "title": str(item["title"]).strip()[:200],
                     "description": str(item.get("description", "")).strip()[:500],
                     "priority": item.get("priority", "medium") if item.get("priority") in ("high", "medium", "low") else "medium",
+                    "depends_on": sorted(set(i for i in dep_idx if i >= 0)),
                 })
         return out
 
@@ -586,15 +600,20 @@ class _ToolExecutor:
         finally:
             db.close()
 
-        # 2) 调用 LLM 生成任务规划
+        # 2) 调用 LLM 生成任务规划（输出含依赖下标：depends_on 引用任务数组下标）
         try:
             raw = llm.chat_text([
                 {"role": "system", "content":
-                 "你是敏捷项目管理专家。基于项目主题规划 5 条具体可执行的落地任务。"
+                 "你是敏捷项目管理专家。基于项目主题规划 5 条具体可执行的落地任务，"
+                 "并给出任务间的先后依赖。"
                  "只输出 JSON 数组，不要任何多余文字或代码块标记。格式："
-                 '[{"title":"任务标题(不超过14字)","description":"一句话描述含验收要点","priority":"high|medium|low"}]'},
+                 '[{"title":"任务标题(不超过14字)","description":"一句话描述含验收要点",'
+                 '"priority":"high|medium|low","depends_on":[前置任务下标数组]}]。'
+                 "依赖规则：前置任务必须已先完成，本任务才能开始；"
+                 "depends_on 里填本任务依赖的前置任务在数组中的下标（从 0 开始），"
+                 "无依赖则填 []；只允许依赖下标更小的任务（保持数组近似拓扑序），不允许成环。"},
                 {"role": "user", "content": f"项目主题：{topic}"},
-            ], temperature=0.4, max_tokens=900)
+            ], temperature=0.4, max_tokens=1200)
         except Exception as e:
             return {"ok": False, "error": f"任务规划生成失败: {e}"}
 
@@ -612,10 +631,23 @@ class _ToolExecutor:
                     description=t["description"], priority=t["priority"], status="todo")
                 if tk:
                     created.append(tk)
+
+            # 4) 按下标映射建立任务依赖（规划期 depends_on 是数组下标 → 真实任务 id）
+            dep_created = 0
+            for i, t in enumerate(tasks[:6]):
+                if i >= len(created):
+                    break  # 有任务创建失败则跳过其依赖（下标可能错位，安全起见不建）
+                for dep_idx in t.get("depends_on", []):
+                    if 0 <= dep_idx < i and dep_idx < len(created):  # 只允许依赖更小下标
+                        d, ok = task_service.add_dependency(
+                            db, created[i].id, created[dep_idx].id)
+                        if ok:
+                            dep_created += 1
             return {
                 "ok": True,
                 "data": [{"id": tk.id, "title": tk.title, "status": tk.status} for tk in created],
-                "note": f"已规划 {len(created)} 个任务（默认均为待办），可在看板查看并拖拽流转状态",
+                "note": (f"已规划 {len(created)} 个任务、{dep_created} 条依赖（默认均为待办），"
+                         "可在看板查看并拖拽流转状态"),
             }
         finally:
             db.close()

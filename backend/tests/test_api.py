@@ -557,3 +557,35 @@ def test_dependency_project_graph_and_delete_cascade(client):
     assert client.delete(f"/api/tasks/{t1['id']}").status_code == 200
     graph2 = client.get(f"/api/projects/{p['id']}/dependencies").json()
     assert graph2 == []
+
+
+def test_plan_tasks_creates_dependency_tree(client, monkeypatch):
+    """规划输出带 depends_on 下标 → 落库后任务间真实依赖边建立。"""
+    def fake_chat_text(messages, **kwargs):
+        # 依赖树：任务乙依赖任务甲(下标0)；任务丙依赖任务乙(下标1)
+        return ('[{"title":"规划甲-需求分析","description":"d","priority":"high","depends_on":[]},'
+                '{"title":"规划乙-开发","description":"d","priority":"high","depends_on":[0]},'
+                '{"title":"规划丙-联调发布","description":"d","priority":"medium","depends_on":[1]}]')
+
+    monkeypatch.setattr("core.llm.chat_text", fake_chat_text)
+    p = _new_project(client, "依赖规划项目")
+
+    r = client.post(f"/api/projects/{p['id']}/plan", params={"user_id": 1})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["planned"] == 3
+    assert "依赖" in data["note"]  # note 带依赖数说明
+
+    # 按标题取任务 id
+    tasks = {t["title"]: t for t in client.get(f"/api/tasks?project_id={p['id']}").json()}
+    a, b, c = tasks["规划甲-需求分析"], tasks["规划乙-开发"], tasks["规划丙-联调发布"]
+
+    # 依赖边真实建立：乙依赖甲、丙依赖乙
+    assert a["depends_on"] == []
+    assert b["depends_on"] == [a["id"]]
+    assert c["depends_on"] == [b["id"]]
+
+    # 影响分析闭环：甲(需求分析)延期 → 乙、丙都被阻塞
+    r_impact = client.get(f"/api/tasks/{a['id']}/impact").json()
+    blocked_ids = {x["id"] for x in r_impact["blocked_tasks"]}
+    assert blocked_ids == {b["id"], c["id"]}
