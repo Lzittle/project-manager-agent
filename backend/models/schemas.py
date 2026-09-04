@@ -89,6 +89,23 @@ class TaskOut(BaseModel):
     due_date: Optional[date] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # 依赖摘要（由接口层填充，非 ORM 列）：本任务的前置任务 id 列表
+    depends_on: Optional[list[int]] = None
+
+
+# ---------- 任务依赖 ----------
+class DependencyCreate(BaseModel):
+    task_id: int
+    depends_on_id: int
+
+
+class TaskDependencyOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    task_id: int
+    depends_on_id: int
+    created_at: Optional[datetime] = None
 
 
 # ---------- 任务评论 ----------

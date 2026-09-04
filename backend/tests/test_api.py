@@ -457,3 +457,103 @@ def test_chat_bound_conflict_on_delete_other_project(client):
     assert r.json()["trace"][0]["tool"] == "guard"
     # B 的任务还在
     assert client.get(f"/api/tasks/{tb['id']}").status_code == 200
+
+
+# ---------- 任务依赖 ----------
+def _link(client, task_id, depends_on_id):
+    """POST 建立依赖的便捷封装"""
+    r = client.post(f"/api/tasks/{task_id}/dependencies",
+                    json={"task_id": task_id, "depends_on_id": depends_on_id})
+    return r
+
+
+def test_dependency_add_and_list(client):
+    """A 依赖 B：建立后任务详情带 depends_on，依赖子资源可查。"""
+    p = _new_project(client, "依赖项目1")
+    ta = _new_task(client, p["id"], "任务A")
+    tb = _new_task(client, p["id"], "任务B")
+
+    r = _link(client, ta["id"], tb["id"])
+    assert r.status_code == 201, r.text
+
+    # 任务详情带前置依赖摘要
+    got = client.get(f"/api/tasks/{ta['id']}").json()
+    assert got["depends_on"] == [tb["id"]]
+
+    # 依赖子资源
+    deps = client.get(f"/api/tasks/{ta['id']}/dependencies").json()
+    assert deps == [{"task_id": ta["id"], "depends_on_id": tb["id"]}]
+
+
+def test_dependency_reject_self_and_cross_project(client):
+    """自依赖、跨项目依赖、重复依赖都被拒。"""
+    pa = _new_project(client, "依赖项目A")
+    pb = _new_project(client, "依赖项目B")
+    ta = _new_task(client, pa["id"], "任务A")
+    tb = _new_task(client, pa["id"], "任务B")
+    tc = _new_task(client, pb["id"], "任务C")
+
+    # 自依赖 400
+    assert _link(client, ta["id"], ta["id"]).status_code == 400
+    # 首次建立 201；重复建立幂等 200（Agent 重试不报错）
+    assert _link(client, ta["id"], tb["id"]).status_code == 201
+    dup = _link(client, ta["id"], tb["id"])
+    assert dup.status_code == 200
+    assert dup.json()["created"] is False
+    # 跨项目 400
+    assert _link(client, ta["id"], tc["id"]).status_code == 400
+
+
+def test_dependency_cycle_rejected(client):
+    """A→B 后再建 B→A 会成环，被拦截。"""
+    p = _new_project(client, "依赖环项目")
+    t1 = _new_task(client, p["id"], "任务1")
+    t2 = _new_task(client, p["id"], "任务2")
+    t3 = _new_task(client, p["id"], "任务3")
+
+    assert _link(client, t1["id"], t2["id"]).status_code == 201   # 1 → 2
+    assert _link(client, t2["id"], t3["id"]).status_code == 201   # 2 → 3
+    # 3 → 1 会闭环（3→2→1... 实际 3 依赖 1 后：1→2→3→1 成环）
+    assert _link(client, t3["id"], t1["id"]).status_code == 400
+    # 2 → 1 直接反向也成环
+    assert _link(client, t2["id"], t1["id"]).status_code == 400
+
+
+def test_dependency_impact_analysis(client):
+    """影响分析：前置任务延期 → 列出所有直接/间接被阻塞的下游任务。"""
+    p = _new_project(client, "影响分析项目")
+    # 链条: 1(前端) ← 2(联调) ← 3(发布)；且 4(文档) 依赖 2
+    t1 = _new_task(client, p["id"], "前置设计")
+    t2 = _new_task(client, p["id"], "联调")
+    t3 = _new_task(client, p["id"], "发布上线")
+    t4 = _new_task(client, p["id"], "写文档")
+    for dep_task, pre in [(t2, t1), (t3, t2), (t4, t2)]:
+        assert _link(client, dep_task["id"], pre["id"]).status_code == 201
+
+    # t1 延期 → 阻塞 2、3、4（间接含 3）
+    r = client.get(f"/api/tasks/{t1['id']}/impact").json()
+    blocked_ids = {b["id"] for b in r["blocked_tasks"]}
+    assert r["blocked_count"] == 3
+    assert blocked_ids == {t2["id"], t3["id"], t4["id"]}
+
+    # t3 没有下游 → 不阻塞任何人
+    r3 = client.get(f"/api/tasks/{t3['id']}/impact").json()
+    assert r3["blocked_count"] == 0
+
+
+def test_dependency_project_graph_and_delete_cascade(client):
+    """项目级依赖图可查；删除任务后相关依赖边被清理。"""
+    p = _new_project(client, "依赖图项目")
+    t1 = _new_task(client, p["id"], "任务1")
+    t2 = _new_task(client, p["id"], "任务2")
+    assert _link(client, t2["id"], t1["id"]).status_code == 201
+
+    graph = client.get(f"/api/projects/{p['id']}/dependencies").json()
+    assert len(graph) == 1
+    assert graph[0]["task_title"] == "任务2"
+    assert graph[0]["depends_on_title"] == "任务1"
+
+    # 删除前置任务 t1 → 依赖边消失，且不再悬空引用
+    assert client.delete(f"/api/tasks/{t1['id']}").status_code == 200
+    graph2 = client.get(f"/api/projects/{p['id']}/dependencies").json()
+    assert graph2 == []

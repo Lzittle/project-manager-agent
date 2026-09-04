@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from models.database import get_db
 from models.schemas import ProjectCreate, ProjectUpdate, ProjectOut
-from services import project_service
+from services import project_service, task_service
 from core.agent import _ToolExecutor
 
 router = APIRouter()
@@ -27,6 +27,15 @@ def create_project(
     db: Session = Depends(get_db),
 ):
     return project_service.create_project(db, user_id, body.name, body.description)
+
+
+@router.get("/{project_id}/dependencies")
+def list_project_dependencies(project_id: int, db: Session = Depends(get_db)):
+    """项目全部任务依赖边（含标题/状态），前端画依赖图或 Agent 分析用。"""
+    p = project_service.get_project(db, project_id)
+    if p is None:
+        raise HTTPException(404, f"项目 {project_id} 不存在")
+    return task_service.list_project_dependencies(db, project_id)
 
 
 @router.get("/{project_id}", response_model=ProjectOut)

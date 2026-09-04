@@ -1,8 +1,10 @@
-"""SQLAlchemy 数据库模型：六张业务表 + 引擎/Session 管理。
+"""SQLAlchemy 数据库模型：业务表 + 引擎/Session 管理。
 
-表清单：users / projects / tasks / task_comments / chat_messages / knowledge_documents
-关联：用户 1-N 项目；项目 1-N 任务；任务 1-N 评论；
-      用户 1-N 任务(assignee)；项目 1-N 知识库文档；用户 1-N 聊天消息
+表清单：users / projects / tasks / task_dependencies / task_comments /
+       chat_messages / knowledge_documents
+关联：用户 1-N 项目；项目 1-N 任务；任务 1-N 评论；任务 N-N 任务（依赖，经
+      task_dependencies 桥接）；用户 1-N 任务(assignee)；项目 1-N 知识库文档；
+      用户 1-N 聊天消息
 """
 from datetime import datetime, date
 from sqlalchemy import (
@@ -127,6 +129,33 @@ class Task(Base):
     project = relationship("Project", back_populates="tasks")
     assignee = relationship("User", back_populates="assigned_tasks", foreign_keys=[assignee_id])
     comments = relationship("TaskComment", back_populates="task")
+    # 依赖：task 依赖哪些前置任务；被哪些任务依赖（按需懒加载）
+    dependencies = relationship(
+        "TaskDependency", back_populates="task",
+        foreign_keys="TaskDependency.task_id",
+        cascade="all, delete-orphan",
+    )
+
+
+class TaskDependency(Base):
+    """任务依赖表：task_id 依赖 depends_on_id（即 depends_on 是前置任务，需先完成）。
+
+    示例：任务 3「联调」依赖任务 2「后端接口」→ (task_id=3, depends_on_id=2)。
+    语义上等价「3 → 2」，做影响分析时从某任务沿 depends_on 反向（或沿下游）遍历。
+    约束：同项目内任务；禁止自依赖；禁止成环（服务层校验）。
+    """
+    __tablename__ = "task_dependencies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False, index=True)
+    depends_on_id = Column(Integer, ForeignKey("tasks.id"), nullable=False, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    # 关系：task_dependencies.task_id → tasks.id（task 的依赖）
+    task = relationship("Task", back_populates="dependencies",
+                        foreign_keys=[task_id])
+    # 前置任务本身（方便读 depends_on 的标题/状态）
+    depends_on = relationship("Task", foreign_keys=[depends_on_id])
 
 
 class TaskComment(Base):
