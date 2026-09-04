@@ -91,6 +91,8 @@ npm run dev                 # http://localhost:5173 （已代理 /api → 8000�
 
 演示账号：seed 内置 `alice`（user_id=1，无登录体系，demo 用）。
 
+> 💡 **本地开发遇到"改了代码但接口仍是旧行为/404"** → 先读 [`docs/DEV_OPS.md`](docs/DEV_OPS.md)（Windows 端口僵尸进程排查、重启协议、行为探针验证纪律）。
+
 ## 五、目录结构
 
 ```
