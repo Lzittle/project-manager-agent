@@ -47,7 +47,8 @@ def _chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP)
     return chunks
 
 
-def index_document(doc_db_id: int, project_id: int, title: str, content: str) -> int:
+def index_document(doc_db_id: int, project_id: int, title: str, content: str,
+                   doc_type: str = "doc") -> int:
     """将一篇知识库文档分块写入向量库。返回分块数。可重复调用（先删旧 chunk 再写）。"""
     col = _get_collection()
     # 若该文档此前已入库（重新上传场景），先清理旧分块
@@ -58,7 +59,8 @@ def index_document(doc_db_id: int, project_id: int, title: str, content: str) ->
     chunks = _chunk_text(content)
     ids = [f"doc-{doc_db_id}-c{i}" for i in range(len(chunks))]
     metadatas = [
-        {"doc_db_id": doc_db_id, "project_id": project_id, "title": title, "chunk": i}
+        {"doc_db_id": doc_db_id, "project_id": project_id, "title": title,
+         "doc_type": doc_type, "chunk": i}
         for i in range(len(chunks))
     ]
     col.add(ids=ids, documents=chunks, metadatas=metadatas)
@@ -70,7 +72,7 @@ def search(
     project_id: Optional[int] = None,
     top_k: int = DEFAULT_TOP_K,
 ) -> list[dict]:
-    """向量检索：返回 [{text, title, project_id, doc_db_id, chunk, distance}]"""
+    """向量检索：返回 [{text, title, project_id, doc_db_id, doc_type, chunk, distance}]"""
     col = _get_collection()
     where = {"project_id": project_id} if project_id is not None else None
     result = col.query(
@@ -89,6 +91,7 @@ def search(
             "title": meta.get("title", ""),
             "project_id": meta.get("project_id"),
             "doc_db_id": meta.get("doc_db_id"),
+            "doc_type": meta.get("doc_type", "doc"),
             "chunk": meta.get("chunk"),
             "distance": dist,
         })

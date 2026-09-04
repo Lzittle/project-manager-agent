@@ -25,6 +25,7 @@ async def upload_document(
     project_id: int,
     file: UploadFile = File(...),
     title: str | None = Form(None),
+    doc_type: str = Form("doc"),  # doc=需求/方案文档, meeting=会议纪要（长期记忆）
     db: Session = Depends(get_db),
 ):
     raw = await file.read()
@@ -38,7 +39,26 @@ async def upload_document(
     # 扩展名推断 file_type
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "txt"
 
-    doc = knowledge_service.create_document(db, project_id, doc_title, content, ext)
+    doc = knowledge_service.create_document(db, project_id, doc_title, content, ext,
+                                            doc_type=doc_type)
+    if doc is None:
+        raise HTTPException(404, f"项目 {project_id} 不存在")
+    return doc
+
+
+@router.post("/projects/{project_id}/meetings", response_model=KnowledgeDocOut, status_code=201)
+async def upload_meeting(
+    project_id: int,
+    title: str = Form(...),
+    content: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    """录入一篇会议纪要（项目长期记忆）。内容自动分块向量化，供 Agent RAG 检索。
+
+    body: multipart/form-data，title 纪要主题（如「2026-09-01 迭代评审」），content 纪要正文。
+    """
+    doc = knowledge_service.create_document(db, project_id, title.strip(), content.strip(),
+                                            file_type="txt", doc_type="meeting")
     if doc is None:
         raise HTTPException(404, f"项目 {project_id} 不存在")
     return doc

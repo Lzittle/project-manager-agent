@@ -7,12 +7,14 @@
 供前端渲染「执行轨迹 + 可点击跳转的实体引用」。
 """
 import json
+import re
 import time
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from core.agent import Agent, resolve_bound_action, is_ask_detail_intent
+from core.rag import search as rag_search
 from models.database import get_db, ChatMessage
 from models.schemas import ChatRequest, ChatMessageOut
 from services import project_service
@@ -20,6 +22,12 @@ from services import project_service
 router = APIRouter()
 
 HISTORY_LIMIT = 20  # 作为上下文带入 Agent 的最近消息条数
+
+# 资料/记忆类意图：绑定项目时由代码层自动 RAG 检索注入（项目长期记忆），
+# 无需模型自觉调用 search_knowledge —— 否则模型经常「不查就答」。
+_MATERIAL_HINT = re.compile(
+    r"需求|方案|设计|文档|纪要|会议|规则|验收|标准|规范|做法|背景|目标|"
+    r"怎么|如何|为什么|哪些资料|记不记得|之前说过|上回|上次|参考|根据|文档里")
 
 
 def _format_plan_reply(res: dict, project_name: str | None) -> str:
@@ -54,6 +62,36 @@ def _format_snapshot_note(snap: dict) -> str:
     if not (high or blocked) and d.get("task_count", 0) == 0:
         lines.append("- 项目暂无任务，可建议用户先「帮我规划任务」。")
     return "\n".join(lines)
+
+
+def _format_rag_note(hits: list[dict]) -> str:
+    """把 RAG 命中的记忆片段压成给模型的 system 上下文（标注来源，防止模型当自己的知识）。"""
+    lines = ["【项目记忆检索结果（来自知识库/会议纪要，回答务必基于以下原文，不得编造）】"]
+    for i, h in enumerate(hits[:3], 1):
+        src = h.get("doc_type") or ""
+        src_label = "会议纪要" if src == "meeting" else "知识库"
+        lines.append(f"{i}. 《{h.get('title','')}》〔{src_label}〕：{h.get('text','')[:300]}")
+    return "\n".join(lines)
+
+
+def _maybe_inject_memory(db: Session, message: str, project_id: int | None) -> str | None:
+    """资料/记忆类问题 + 已绑定项目 → 自动 RAG 检索注入上下文；失败静默降级。
+
+    这是「项目长期记忆」的落点：会议纪要/需求文档向量化后，用户在对话中问
+    「上次怎么定的/文档里怎么说」时，代码层自动把相关片段捞回来注入思考，
+    模型不必（也常不会）自觉调用 search_knowledge。检索无命中或异常时不打扰对话。
+    """
+    if project_id is None:
+        return None
+    if not _MATERIAL_HINT.search(message):
+        return None
+    try:
+        hits = rag_search(message, project_id=project_id, top_k=3)
+    except Exception:
+        return None  # embedding 未就绪/向量库异常 → 静默降级，不让检索拖垮对话
+    if not hits:
+        return None
+    return _format_rag_note(hits)
 
 
 def _load_history(db: Session, user_id: int, project_id: int | None,
@@ -157,8 +195,16 @@ def chat_send(body: ChatRequest, db: Session = Depends(get_db)):
     history = _load_history(db, body.user_id, body.project_id,
                             exclude_last_user_content=body.message)
     if reply is None:
-        reply = agent.run(body.message, history=history)
+        # 长期记忆注入：绑定项目 + 资料/记忆类问题 → 代码层自动 RAG 检索
+        # （失败静默降级，不影响对话；命中则作为 system 上下文交给模型）
+        memory_note = _maybe_inject_memory(db, body.message, body.project_id)
+        reply = agent.run(body.message, history=history, context_note=memory_note)
         trace = agent.executor.last_trace
+        # 检索动作本身记入轨迹，让「Agent 查了项目记忆」对用户可见
+        if memory_note:
+            trace = [{"tool": "search_knowledge", "label": "检索项目记忆",
+                      "detail": f"自动检索知识库/会议纪要，命中 {memory_note.count('《')} 篇相关片段",
+                      "ok": True, "ms": 0}] + trace
 
     # 4) 助手回复落库（附执行轨迹 JSON，供历史页回放）
     assistant_msg = ChatMessage(role="assistant", content=reply,

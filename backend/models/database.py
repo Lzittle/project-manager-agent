@@ -48,17 +48,19 @@ def _run_light_migrations(engine) -> None:
     说明：SQLite 的 ALTER 仅支持加列；加列需允许 NULL 且无默认值约束。
     """
     with engine.connect() as conn:
-        cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(chat_messages)")]
-        if "project_id" not in cols:
-            conn.exec_driver_sql(
-                "ALTER TABLE chat_messages ADD COLUMN project_id INTEGER")
-            conn.commit()
-            print("[migrate] chat_messages 新增 project_id 列")
-        if "trace" not in cols:
-            conn.exec_driver_sql(
-                "ALTER TABLE chat_messages ADD COLUMN trace TEXT")
-            conn.commit()
-            print("[migrate] chat_messages 新增 trace 列（Agent 执行轨迹 meta JSON）")
+        _ensure_column(conn, "chat_messages", "project_id", "INTEGER", "chat_messages 新增 project_id 列")
+        _ensure_column(conn, "chat_messages", "trace", "TEXT", "chat_messages 新增 trace 列（Agent 执行轨迹 meta JSON）")
+        _ensure_column(conn, "knowledge_documents", "doc_type", "VARCHAR(20)",
+                       "knowledge_documents 新增 doc_type 列（doc=文档 / meeting=会议纪要）")
+
+
+def _ensure_column(conn, table: str, column: str, ddl_type: str, log_msg: str) -> None:
+    """轻量迁移：若表缺列则 ALTER 补上（SQLite 仅支持 ADD COLUMN）。"""
+    cols = [row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")]
+    if column not in cols:
+        conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
+        conn.commit()
+        print(f"[migrate] {log_msg}")
 
 
 # ---------- 数据表 ----------
@@ -180,6 +182,7 @@ class KnowledgeDocument(Base):
     title = Column(String(200), nullable=False)
     content = Column(Text, nullable=False)
     file_type = Column(String(20), default="txt")  # txt / md / pdf ...
+    doc_type = Column(String(20), default="doc", index=True)  # doc=需求/方案文档, meeting=会议纪要
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
     created_at = Column(DateTime, server_default=func.now())
 

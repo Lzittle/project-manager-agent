@@ -16,13 +16,17 @@ def create_document(
     title: str,
     content: str,
     file_type: str = "txt",
+    doc_type: str = "doc",
 ) -> Optional[KnowledgeDocument]:
     from models.database import Project
     if db.get(Project, project_id) is None:
         return None
+    if doc_type not in ("doc", "meeting"):
+        doc_type = "doc"
 
     doc = KnowledgeDocument(title=title, content=content,
-                            file_type=file_type, project_id=project_id)
+                            file_type=file_type, project_id=project_id,
+                            doc_type=doc_type)
     db.add(doc)
     db.flush()  # 先拿到 doc.id 供向量库使用
     try:

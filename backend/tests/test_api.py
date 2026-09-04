@@ -677,3 +677,79 @@ def test_chat_query_with_write_action_goes_to_tools(client, monkeypatch):
     assert any(s["tool"] == "update_task_status" for s in steps)
     assert not any(s["tool"] == "project_snapshot" for s in steps)
     assert client.get(f"/api/tasks/{t['id']}").json()["status"] == "done"
+
+
+# ---------- 长期记忆：资料类问题自动 RAG 检索注入 ----------
+
+def test_chat_material_question_auto_injects_memory(client, monkeypatch):
+    """绑定项目问「上次会议怎么定的」→ 代码层自动检索并注入记忆片段（无需模型自觉调工具）。"""
+    from types import SimpleNamespace
+
+    p = _new_project(client, "记忆项目")
+    # rag.search 打桩返回一篇会议纪要命中（真实向量写入由专门集成测试覆盖）
+
+    seen = {"has_memory": False}
+
+    def fake_chat(messages, tools=None, **kwargs):
+        for m in messages:
+            if m["role"] == "system" and "项目记忆检索结果" in m["content"]:
+                seen["has_memory"] = True
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(
+                content="根据上次会议纪要，登录采用手机号验证码方案。", tool_calls=None))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+    monkeypatch.setattr("api.chat.rag_search", lambda *a, **kw: [
+        {"title": "2026-09-01 迭代评审", "text": "会议结论：登录模块采用手机号验证码方案，不做第三方登录。",
+         "doc_type": "meeting"}])
+
+    r = client.post("/api/chat/send",
+                    json={"message": "上次会议怎么定的登录方案", "user_id": 1, "project_id": p["id"]})
+    assert r.status_code == 200
+    assert seen["has_memory"], "资料类问题应自动注入 RAG 记忆片段"
+    # trace 首屏是自动检索动作
+    assert r.json()["trace"][0]["tool"] == "search_knowledge"
+    assert "检索项目记忆" in r.json()["trace"][0]["label"]
+
+
+def test_chat_non_material_no_injection(client, monkeypatch):
+    """闲聊/非资料类问题 → 不做 RAG 注入（省一次向量检索）。"""
+    from types import SimpleNamespace
+
+    p = _new_project(client, "闲聊项目")
+
+    def fake_chat(messages, tools=None, **kwargs):
+        for m in messages:
+            if m["role"] == "system" and "项目记忆检索结果" in m["content"]:
+                raise AssertionError("非资料类问题不应注入记忆")
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(content="你好呀！", tool_calls=None))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+
+    r = client.post("/api/chat/send",
+                    json={"message": "你好，帮我介绍一下这个系统能做什么", "user_id": 1, "project_id": p["id"]})
+    assert r.status_code == 200
+
+
+def test_chat_memory_inject_failure_silent(client, monkeypatch):
+    """RAG 检索异常（embedding 未就绪等）→ 静默降级，对话照常。"""
+    from types import SimpleNamespace
+
+    p = _new_project(client, "降级项目")
+
+    def fake_chat(messages, tools=None, **kwargs):
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(content="正常回答", tool_calls=None))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+
+    def boom(*a, **kw):
+        raise RuntimeError("embedding 模型未就绪")
+
+    monkeypatch.setattr("api.chat.rag_search", boom)
+
+    r = client.post("/api/chat/send",
+                    json={"message": "文档里怎么说验收标准", "user_id": 1, "project_id": p["id"]})
+    assert r.status_code == 200
+    assert r.json()["reply"] == "正常回答"

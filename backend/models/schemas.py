@@ -140,6 +140,7 @@ class KnowledgeDocOut(BaseModel):
     title: str
     content: str
     file_type: str
+    doc_type: Optional[str] = "doc"  # doc=文档 / meeting=会议纪要
     project_id: int
     created_at: Optional[datetime] = None
 
