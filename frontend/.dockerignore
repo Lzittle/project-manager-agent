@@ -1,0 +1,5 @@
+# 构建上下文排除：不进镜像
+node_modules/
+dist/
+.env*
+*.log

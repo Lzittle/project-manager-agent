@@ -1,0 +1,41 @@
+# =============================================================
+# 项目管理 Agent —— 一键容器化部署
+#
+#   docker compose up -d --build      # 构建并启动
+#   docker compose logs -f backend    # 看后端日志
+#   docker compose down               # 停止（数据保留在 ./docker_data/）
+#   docker compose down -v            # 停止并清空数据（慎用）
+#
+# 设计要点（针对"本地起服务杀不掉旧进程"痛点）：
+#   1. 后端容器【不映射宿主端口】——仅容器内网 backend:8000，
+#      由 nginx 反代。彻底绕开本地 8000/8001 端口占用/僵尸进程问题。
+#   2. 对外只暴露前端 http://localhost:8080，/api 由 nginx 统一转发。
+#   3. SQLite + Chroma 数据落在 ./docker_data/（volume 挂载），
+#      down/up 不丢数据；删 docker_data/ 即重置。
+# =============================================================
+services:
+  backend:
+    build: ./backend
+    container_name: pma-backend
+    # 注入 LLM 密钥等（backend/.env 不进镜像，运行时注入）
+    env_file:
+      - ./backend/.env
+    environment:
+      # 数据目录指向 /data（容器内），由 volume 持久化；覆盖 .env 中的相对路径
+      DATABASE_URL: sqlite:////data/project_manager.db
+      CHROMA_PERSIST_DIR: /data/chroma_db
+    # 如需直连后端 API 调试，取消下行注释（宿主机端口自选，避开已占用端口）
+    # ports:
+    #   - "8001:8000"
+    volumes:
+      - ./docker_data:/data
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: pma-frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"          # 访问 http://localhost:8080
+    restart: unless-stopped

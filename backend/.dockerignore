@@ -1,0 +1,18 @@
+# ---------- 构建上下文排除：不进镜像 ----------
+# 依赖/虚拟环境
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 密钥（.env 用 docker-compose env_file 注入，绝不 COPY 进镜像）
+.env
+.env.*
+
+# 本地数据库与向量库（容器用 volume 持久化到宿主 docker_data/）
+*.db
+chroma_db/
+chroma_db_test/
+
+# 测试产物
+test_project_manager.db

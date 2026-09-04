@@ -33,3 +33,7 @@ frontend/.output
 # pytest 测试库
 backend/chroma_db_test/
 backend/test_project_manager.db
+
+# Docker 数据卷（本地持久化，不入库）
+docker_data/
+
