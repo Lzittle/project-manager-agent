@@ -767,3 +767,73 @@ def test_chat_memory_inject_failure_silent(client, monkeypatch):
                     json={"message": "文档里怎么说验收标准", "user_id": 1, "project_id": p["id"]})
     assert r.status_code == 200
     assert r.json()["reply"] == "正常回答"
+
+
+# ---------- 上下文感知规划（防重复 / 读记忆 / 数量自适应） ----------
+
+def _capture_plan_ctx(client, monkeypatch, project_id, existing_title="", rag_hits=None):
+    """触发 plan_tasks 并捕获发给模型的 user 上下文。返回 (reply, ctx_text)。"""
+    from types import SimpleNamespace
+    captured = {}
+
+    def fake_chat(messages, **kwargs):
+        for m in messages:
+            if m["role"] == "user":
+                captured["ctx"] = m["content"]
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(
+                content='[{"title":"规划新任务X","description":"d","priority":"medium","depends_on":[]}]'))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+    if rag_hits is not None:
+        monkeypatch.setattr("core.agent.rag_search", lambda *a, **kw: rag_hits)
+
+    r = client.post("/api/chat/send",
+                    json={"message": "继续帮我规划几个任务", "user_id": 1, "project_id": project_id})
+    assert r.status_code == 200
+    return r, captured.get("ctx", "")
+
+
+def test_plan_incremental_avoids_duplicates(client, monkeypatch):
+    """项目已有任务 → 规划上下文注入已有任务清单并要求不重复（增量补缺）。"""
+    p = _new_project(client, "增量规划项目")
+    _new_task(client, p["id"], "已有任务-登录开发", status="todo")
+
+    r, ctx = _capture_plan_ctx(client, monkeypatch, p["id"],
+                               rag_hits=[])  # 无记忆命中
+    assert "已有任务" in ctx and "登录开发" in ctx
+    assert "不要与下列标题重复" in ctx or "禁止重复" in ctx or "请勿与下列标题重复" in ctx
+    assert "增量" in r.json()["reply"] or "从零规划" in r.json()["reply"]
+
+
+def test_plan_reads_project_memory(client, monkeypatch):
+    """RAG 有会议纪要命中 → 注入记忆上下文，任务贴合历史决策。"""
+    p = _new_project(client, "记忆规划项目")
+    hits = [{"title": "2026-09-01 评审", "text": "结论：采用私有化部署，不做 SaaS。",
+             "doc_type": "meeting"}]
+    r, ctx = _capture_plan_ctx(client, monkeypatch, p["id"], rag_hits=hits)
+    assert "项目记忆" in ctx
+    assert "私有化部署" in ctx and "会议纪要" in ctx
+
+
+def test_plan_adaptive_count_prompt(client, monkeypatch):
+    """系统提示不再写死 5 条：按复杂度自适应，且保留依赖规则。"""
+    from types import SimpleNamespace
+    p = _new_project(client, "自适应数量项目")
+    seen = {}
+
+    def fake_chat(messages, **kwargs):
+        for m in messages:
+            if m["role"] == "system":
+                seen["sys"] = m["content"]
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(content='[]'))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+
+    r = client.post("/api/chat/send",
+                    json={"message": "帮我规划几个任务", "user_id": 1, "project_id": p["id"]})
+    assert r.status_code == 200
+    assert "任务数量不设固定值" in seen["sys"]
+    assert "3~4" in seen["sys"] or "自适应" in seen["sys"]
+    assert "depends_on" in seen["sys"]  # 依赖树规则仍保留

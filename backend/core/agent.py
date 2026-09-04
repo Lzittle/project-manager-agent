@@ -677,37 +677,74 @@ class _ToolExecutor:
         return out
 
     def plan_tasks(self, project_id: Optional[int] = None, goal: str = "") -> dict:
-        """自动规划任务。主题一律取项目自身名称，不接受模型传入的 goal，
-        避免模型受历史话术误导、给别的主题生成任务。"""
+        """上下文感知的任务规划（AI 全流程）：
+        1) 读项目已有任务清单 → 已有任务则「增量补缺」，防重复生成；
+        2) RAG 检索项目记忆（会议纪要/需求文档）→ 任务贴合历史决策；
+        3) 数量按项目复杂度 3~8 条自适应，不再写死 5 条；
+        4) 落库带 depends_on 真实依赖边。
+        主题一律取项目自身名称与描述，不接受模型传入的 goal，
+        避免模型受历史话术误导、给别的主题生成任务。
+        """
         # project_id 未提供时回落到当前绑定项目
         pid = project_id or self.project_id
         if pid is None:
             return {"ok": False, "error": "未指定项目：请先绑定项目或在话术中说明项目名称"}
 
-        # 1) 项目校验 + 确定主题（以项目名称为准）
+        # 1) 项目信息 + 已有任务清单 + RAG 项目记忆（一次性读取）
         db = SessionLocal()
         try:
             p = db.get(Project, pid)
             if p is None:
                 return {"ok": False, "error": f"项目 {pid} 不存在"}
-            topic = f"{p.name} 项目"
+            project_desc = {"name": p.name, "description": p.description or "", "status": p.status}
+            existing = task_service.list_tasks(db, pid)
+            existing_titles = [t.title for t in existing]
+            existing_count = len(existing)
         finally:
             db.close()
 
-        # 2) 调用 LLM 生成任务规划（chat_json：JSON 结构化输出 + 解析失败自动重试）
+        # 2) RAG 检索项目记忆（会议纪要/需求文档）；失败静默降级，不影响规划
+        memory_snippets = []
+        try:
+            hits = rag_search(project_desc["name"], project_id=pid, top_k=3)
+            memory_snippets = [{"title": h["title"], "text": h["text"][:300],
+                                "doc_type": h.get("doc_type", "doc")} for h in hits]
+        except Exception:
+            memory_snippets = []
+
+        # 3) 组装上下文：项目描述 + 已有任务（增量防重复）+ 记忆片段
+        ctx_lines = [f"项目名称：{project_desc['name']}",
+                     f"项目描述：{project_desc['description'] or '（无）'}"]
+        if existing_count:
+            ctx_lines.append(
+                "项目已有任务（规划时请勿与下列标题重复，只补充缺失/后续阶段的任务）：")
+            ctx_lines += [f"  {i}. {t}" for i, t in enumerate(existing_titles, 1)]
+        else:
+            ctx_lines.append("项目当前没有任务：请从零规划第一批落地任务。")
+        if memory_snippets:
+            ctx_lines.append("项目记忆（会议纪要/文档检索命中，任务应贴合其中的决策）：")
+            for m in memory_snippets:
+                tag = "会议纪要" if m["doc_type"] == "meeting" else "文档"
+                ctx_lines.append(f"  ·《{m['title']}》[{tag}] {m['text']}")
+        else:
+            ctx_lines.append("（知识库暂无相关记忆，按项目描述合理规划即可）")
+        ctx = "\n".join(ctx_lines)
+
+        # 4) 调用 LLM 生成任务规划（chat_json：JSON 结构化输出 + 解析失败自动重试）
         try:
             parsed, jerr = llm.chat_json([
                 {"role": "system", "content":
-                 "你是敏捷项目管理专家。基于项目主题规划 5 条具体可执行的落地任务，"
-                 "并给出任务间的先后依赖。"
+                 "你是敏捷项目管理专家。基于项目上下文规划一组具体可执行的落地任务，并给出任务间的先后依赖。"
+                 "任务数量不设固定值：按项目复杂度自适应（简单项目 3~4 条，中等 5~6 条，复杂 7~8 条），"
+                 "项目已有任务时应增量补缺、聚焦后续阶段，禁止重复已有标题。"
                  "输出 JSON 数组，格式："
                  '[{"title":"任务标题(不超过14字)","description":"一句话描述含验收要点",'
                  '"priority":"high|medium|low","depends_on":[前置任务下标数组]}]。'
                  "依赖规则：前置任务必须已先完成，本任务才能开始；"
                  "depends_on 里填本任务依赖的前置任务在数组中的下标（从 0 开始），"
                  "无依赖则填 []；只允许依赖下标更小的任务（保持数组近似拓扑序），不允许成环。"},
-                {"role": "user", "content": f"项目主题：{topic}"},
-            ], temperature=0.4, max_tokens=1200)
+                {"role": "user", "content": ctx},
+            ], temperature=0.4, max_tokens=1500)
         except Exception as e:
             return {"ok": False, "error": f"任务规划生成失败: {e}"}
 
@@ -717,20 +754,19 @@ class _ToolExecutor:
             return {"ok": False, "error":
                     f"任务规划生成失败（模型输出无法解析：{jerr or '空结果'}），请重试或直接说明任务明细"}
 
-        # 3) 批量落库（统一默认待办：规划≠开工，是否开始做由用户在看板拖拽决定）
+        # 5) 批量落库（统一默认待办）+ 按 depends_on 下标映射建真实依赖边
         db = SessionLocal()
         try:
             created = []
-            for t in tasks[:6]:
+            for t in tasks[:10]:  # 上限 10 条防失控，实际由模型按复杂度 3~8
                 tk = task_service.create_task(
                     db, pid, self.user_id, t["title"],
                     description=t["description"], priority=t["priority"], status="todo")
                 if tk:
                     created.append(tk)
 
-            # 4) 按下标映射建立任务依赖（规划期 depends_on 是数组下标 → 真实任务 id）
             dep_created = 0
-            for i, t in enumerate(tasks[:6]):
+            for i, t in enumerate(tasks[:10]):
                 if i >= len(created):
                     break  # 有任务创建失败则跳过其依赖（下标可能错位，安全起见不建）
                 for dep_idx in t.get("depends_on", []):
@@ -739,10 +775,11 @@ class _ToolExecutor:
                             db, created[i].id, created[dep_idx].id)
                         if ok:
                             dep_created += 1
+            mode = "增量补充" if existing_count else "从零规划"
             return {
                 "ok": True,
                 "data": [{"id": tk.id, "title": tk.title, "status": tk.status} for tk in created],
-                "note": (f"已规划 {len(created)} 个任务、{dep_created} 条依赖（默认均为待办），"
+                "note": (f"{mode} {len(created)} 个任务、{dep_created} 条依赖（默认均为待办），"
                          "可在看板查看并拖拽流转状态"),
             }
         finally:
