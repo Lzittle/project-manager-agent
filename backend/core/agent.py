@@ -634,20 +634,26 @@ class _ToolExecutor:
 
     # ---------- 任务自动规划（plan_tasks 工具） ----------
     @staticmethod
-    def _parse_tasks(raw: str) -> list[dict]:
-        """从模型输出中提取任务 JSON 数组（容忍 ```json 围栏与多余文字）。
+    def _parse_tasks(raw) -> list[dict]:
+        """从模型输出中提取任务 JSON 数组。
 
-        规划期任务尚无数据库 id，依赖用「数组下标」逻辑引用：
-        {"title":"联调","depends_on":[1]} 表示联调依赖下标 1 的任务。
-        落库阶段（plan_tasks）会按下标映射回真实任务 id 建依赖边。
+        输入 raw 可以是字符串（由 chat_json 兜底解析失败时的兼容路径）或
+        已经解析好的 list（chat_json 正常路径）。每个任务：
+        {"title":..., "description":..., "priority":..., "depends_on":[前置任务下标]}
+        规划期任务尚无数据库 id，依赖用「数组下标」逻辑引用，落库时映射回真实 id。
         """
-        text = raw.strip()
-        m = re.search(r"\[[\s\S]*\]", text)
-        if not m:
-            return []
-        try:
-            data = json.loads(m.group(0))
-        except json.JSONDecodeError:
+        if isinstance(raw, list):
+            data = raw
+        elif isinstance(raw, str):
+            text = raw.strip()
+            m = re.search(r"\[[\s\S]*\]", text)
+            if not m:
+                return []
+            try:
+                data = json.loads(m.group(0))
+            except json.JSONDecodeError:
+                return []
+        else:
             return []
         if not isinstance(data, list):
             return []
@@ -688,13 +694,13 @@ class _ToolExecutor:
         finally:
             db.close()
 
-        # 2) 调用 LLM 生成任务规划（输出含依赖下标：depends_on 引用任务数组下标）
+        # 2) 调用 LLM 生成任务规划（chat_json：JSON 结构化输出 + 解析失败自动重试）
         try:
-            raw = llm.chat_text([
+            parsed, jerr = llm.chat_json([
                 {"role": "system", "content":
                  "你是敏捷项目管理专家。基于项目主题规划 5 条具体可执行的落地任务，"
                  "并给出任务间的先后依赖。"
-                 "只输出 JSON 数组，不要任何多余文字或代码块标记。格式："
+                 "输出 JSON 数组，格式："
                  '[{"title":"任务标题(不超过14字)","description":"一句话描述含验收要点",'
                  '"priority":"high|medium|low","depends_on":[前置任务下标数组]}]。'
                  "依赖规则：前置任务必须已先完成，本任务才能开始；"
@@ -705,9 +711,11 @@ class _ToolExecutor:
         except Exception as e:
             return {"ok": False, "error": f"任务规划生成失败: {e}"}
 
-        tasks = self._parse_tasks(raw)
+        # 成功时 parsed 是已解析的 list；失败时 parsed 为 None，走统一空结果分支
+        tasks = self._parse_tasks(parsed if jerr is None else [])
         if not tasks:
-            return {"ok": False, "error": "任务规划生成失败（模型输出无法解析），请重试或直接说明任务明细"}
+            return {"ok": False, "error":
+                    f"任务规划生成失败（模型输出无法解析：{jerr or '空结果'}），请重试或直接说明任务明细"}
 
         # 3) 批量落库（统一默认待办：规划≠开工，是否开始做由用户在看板拖拽决定）
         db = SessionLocal()

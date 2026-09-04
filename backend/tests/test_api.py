@@ -194,12 +194,14 @@ def test_chat_bound_plan_goes_to_bound_project(client, monkeypatch):
     不再反问/串扰（plan_tasks 内部的 LLM 只负责生成任务清单，落点由代码锁定）。"""
     from types import SimpleNamespace
 
-    def fake_chat_text(messages, **kwargs):
+    def fake_chat(messages, **kwargs):
         assert any(m["role"] == "user" for m in messages)
-        return ('[{"title":"规划任务甲","description":"desc","priority":"high"},'
-                '{"title":"规划任务乙","description":"desc","priority":"medium"}]')
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(
+                content='[{"title":"规划任务甲","description":"desc","priority":"high"},'
+                        '{"title":"规划任务乙","description":"desc","priority":"medium"}]'))])
 
-    monkeypatch.setattr("core.llm.chat_text", fake_chat_text)
+    monkeypatch.setattr("core.llm.chat", fake_chat)
 
     pa = _new_project(client, "路由A项目")
     pb = _new_project(client, "路由B项目")
@@ -242,12 +244,16 @@ def test_chat_bound_blocks_other_project_plan(client, monkeypatch):
 
 def test_project_plan_endpoint(client, monkeypatch):
     """新建项目勾选「AI 自动规划」→ 规划接口把任务建到该项目，统一默认待办。"""
-    def fake_chat_text(messages, **kwargs):
-        assert any(m["role"] == "user" for m in messages)
-        return ('[{"title":"一键规划任务甲","description":"d","priority":"high"},'
-                '{"title":"一键规划任务乙","description":"d","priority":"low"}]')
+    from types import SimpleNamespace
 
-    monkeypatch.setattr("core.llm.chat_text", fake_chat_text)
+    def fake_chat(messages, **kwargs):
+        assert any(m["role"] == "user" for m in messages)
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(
+                content='[{"title":"一键规划任务甲","description":"d","priority":"high"},'
+                        '{"title":"一键规划任务乙","description":"d","priority":"low"}]'))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
 
     p = _new_project(client, "一键规划项目")
     r = client.post(f"/api/projects/{p['id']}/plan", params={"user_id": 1})
@@ -269,10 +275,14 @@ def test_project_plan_endpoint(client, monkeypatch):
 
 def test_chat_plan_returns_trace_and_persists(client, monkeypatch):
     """绑定项目规划：/send 返回 plan_tasks 轨迹步骤，且历史消息可回放同一 trace。"""
-    def fake_chat_text(messages, **kwargs):
-        return '[{"title":"轨迹任务甲","description":"d","priority":"medium"}]'
+    from types import SimpleNamespace
 
-    monkeypatch.setattr("core.llm.chat_text", fake_chat_text)
+    def fake_chat(messages, **kwargs):
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(
+                content='[{"title":"轨迹任务甲","description":"d","priority":"medium"}]'))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
     p = _new_project(client, "轨迹项目A")
 
     r = client.post("/api/chat/send",
@@ -561,13 +571,17 @@ def test_dependency_project_graph_and_delete_cascade(client):
 
 def test_plan_tasks_creates_dependency_tree(client, monkeypatch):
     """规划输出带 depends_on 下标 → 落库后任务间真实依赖边建立。"""
-    def fake_chat_text(messages, **kwargs):
-        # 依赖树：任务乙依赖任务甲(下标0)；任务丙依赖任务乙(下标1)
-        return ('[{"title":"规划甲-需求分析","description":"d","priority":"high","depends_on":[]},'
-                '{"title":"规划乙-开发","description":"d","priority":"high","depends_on":[0]},'
-                '{"title":"规划丙-联调发布","description":"d","priority":"medium","depends_on":[1]}]')
+    from types import SimpleNamespace
 
-    monkeypatch.setattr("core.llm.chat_text", fake_chat_text)
+    def fake_chat(messages, **kwargs):
+        # 依赖树：任务乙依赖任务甲(下标0)；任务丙依赖任务乙(下标1)
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(
+                content=('[{"title":"规划甲-需求分析","description":"d","priority":"high","depends_on":[]},'
+                         '{"title":"规划乙-开发","description":"d","priority":"high","depends_on":[0]},'
+                         '{"title":"规划丙-联调发布","description":"d","priority":"medium","depends_on":[1]}]')))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
     p = _new_project(client, "依赖规划项目")
 
     r = client.post(f"/api/projects/{p['id']}/plan", params={"user_id": 1})
