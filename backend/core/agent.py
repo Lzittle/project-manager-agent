@@ -102,6 +102,15 @@ _TASK_ADD_HINT = re.compile(r"(?:加|建|创建|新增|添加|安排|补)\S{0,4}
 # 删除类写意图：覆盖「删掉XX任务/删除XX项目的任务/把XX任务删掉/清掉XX」
 _TASK_DEL_HINT = re.compile(
     r"(?:删|删除|移除|清理|划掉|去掉)\S{0,12}(?:任务|项目)|(?:任务|项目)\S{0,8}(?:删|删除|划掉|移除)")
+# 进度/状态查询（只读，不写数据）：命中则由代码层先注入真实任务数据再让模型作答
+_PROGRESS_HINT = re.compile(
+    r"进度|进展|怎么样了|还剩|还有哪些|任务列表|看看任务|查看任务|任务情况|"
+    r"完成情况|完成多少|多少任务|进行到|当前状态|目前状态|做到哪|状态如何|状态分布|任务状态|"
+    r"有几条|有哪些任务")
+# 出现写动作（加/删/改/规划/状态流转）时不算纯查询，交给对应写工具/写路由
+_WRITE_ACTION = re.compile(
+    r"(?:加|建|创建|新增|添加|安排|补|删|删除|移除|清理|划掉|去掉|"
+    r"改|编辑|更新|标记|设为|调|规划|拆解|分解|生成|安排|推进|开始|完成)\S{0,6}(?:任务|项目|状态|优先级|描述|标题)")
 # 出现「数量 + 个任务」（如：加两个任务 / 增加 3 个任务 / 加几个任务）
 _COUNT_TASK = re.compile(r"(?:[0-9]+|[一二两三四五六七八九十]|两|几|多)\s*个\s*任务")
 # 已给出任务明细的特征（引号包裹 或 「任务：」冒号后跟内容）
@@ -113,6 +122,23 @@ def _is_task_write_intent(text: str) -> bool:
     return (is_plan_intent(text)
             or bool(_TASK_ADD_HINT.search(text))
             or bool(_TASK_DEL_HINT.search(text)))
+
+
+def is_progress_query(text: str) -> bool:
+    """是否「查询项目进度/任务状态」类只读意图。
+
+    命中且已绑定项目时，路由层先强制读取真实任务数据注入上下文，
+    再让模型作答 —— 防止模型「不查库直接泛泛而谈/编造进度」。
+    与写意图互斥：出现加/删/改/推进类动作词时不算查询（走写工具）。
+    """
+    t = text.strip()
+    if not t:
+        return False
+    if _WRITE_ACTION.search(t):
+        return False
+    if _is_task_write_intent(t):
+        return False
+    return bool(_PROGRESS_HINT.search(t))
 
 
 def is_ask_detail_intent(text: str) -> bool:
@@ -142,6 +168,7 @@ def resolve_bound_action(db, user_id: int, bound_project_id: Optional[int],
       ("ask",      None)        要加任务但只给数量/没给明细（如「加两个任务」）
                                 → 先追问内容，绝不自动规划一整批；
       ("plan",      None)       纯规划意图 → 直接对绑定项目执行 plan_tasks；
+      ("query",     None)       只读进度/状态查询 → 先注入真实任务数据再让模型作答；
       ("agent",     None)       其余 → 交给 Agent 工具循环（工具已按绑定项目裁剪）。
 
     说明：仅「提及别的项目」（如“参照A项目的做法”）不拦截，交给裁剪后的
@@ -156,6 +183,8 @@ def resolve_bound_action(db, user_id: int, bound_project_id: Optional[int],
         return ("plan", None)
     if is_ask_detail_intent(message):
         return ("ask", None)
+    if is_progress_query(message):
+        return ("query", None)
     return ("agent", None)
 
 
@@ -352,6 +381,57 @@ class _ToolExecutor:
         finally:
             db.close()
 
+    def project_snapshot(self, project_id: Optional[int] = None) -> dict:
+        """读取项目当前真实状态快照（含依赖与风险），供注入上下文让模型基于数据作答。
+
+        区别于 list_tasks 的平铺列表：这里给模型的是「一句话能看懂」的汇总——
+        各状态数量、未完成高优任务、被阻塞/依赖未就绪的任务。全部来自数据库，模型不可编造。
+        """
+        pid = project_id or self.project_id
+        if pid is None:
+            return {"ok": False, "error": "未指定项目"}
+        db = SessionLocal()
+        try:
+            p = db.get(Project, pid)
+            if p is None:
+                return {"ok": False, "error": f"项目 {pid} 不存在"}
+            tasks = task_service.list_tasks(db, pid)
+            dep_rows = task_service.list_project_dependencies(db, pid)
+            by_status: dict[str, list[dict]] = {"todo": [], "doing": [], "done": []}
+            high_open = []  # 未完成的高优任务
+            for t in tasks:
+                b = self._task_brief(t)
+                by_status.setdefault(t.status, []).append(b)
+                if t.status != "done" and t.priority == "high":
+                    high_open.append(b["title"])
+            # 被依赖阻塞：前置任务未 done 的任务（自己也没 done）
+            dep_by_task: dict[int, list[dict]] = {}
+            for d in dep_rows:
+                dep_by_task.setdefault(d["task_id"], []).append(d)
+            blocked = []
+            for d in dep_rows:
+                if d["depends_on_status"] != "done":
+                    blocked.append({
+                        "task": d["task_title"],
+                        "waiting_on": d["depends_on_title"],
+                        "pre_status": d["depends_on_status"],
+                    })
+            return {
+                "ok": True,
+                "data": {
+                    "project": {"id": p.id, "name": p.name,
+                                "status": p.status, "description": p.description},
+                    "task_count": len(tasks),
+                    "by_status": {k: len(v) for k, v in by_status.items()},
+                    "done_ratio": round(len(by_status["done"]) / len(tasks), 2) if tasks else 0.0,
+                    "high_open": high_open[:10],
+                    "blocked": blocked[:10],
+                    "dependencies": len(dep_rows),
+                },
+            }
+        finally:
+            db.close()
+
     def create_task(self, project_id: Optional[int] = None, title: str = "",
                     description: str = "", status: str = "todo",
                     priority: str = "medium") -> dict:
@@ -480,6 +560,7 @@ class _ToolExecutor:
         "plan_tasks": "自动规划任务",
         "delete_task": "删除任务", "delete_project": "删除项目",
         "update_task_fields": "编辑任务", "update_project_fields": "编辑项目",
+        "project_snapshot": "读取项目状态",
     }
     _TASK_TOOLS = {"create_task", "update_task_status", "delete_task", "update_task_fields"}
     _PROJECT_TOOLS = {"create_project", "delete_project", "update_project_fields"}
@@ -533,6 +614,13 @@ class _ToolExecutor:
             detail = f"共 {len(data)} 个项目"
         elif name == "list_tasks" and isinstance(data, list):
             detail = f"共 {len(data)} 个任务"
+        elif name == "project_snapshot" and isinstance(data, dict):
+            s = data
+            detail = (f"项目「{s.get('project',{}).get('name','')}」："
+                      f"共 {s.get('task_count',0)} 个任务，"
+                      f"待办 {s.get('by_status',{}).get('todo',0)} / "
+                      f"进行中 {s.get('by_status',{}).get('doing',0)} / "
+                      f"完成 {s.get('by_status',{}).get('done',0)}")
         elif name == "search_knowledge" and isinstance(data, list):
             detail = f"检索到 {len(data)} 条相关片段" if data else "知识库暂无相关内容"
         else:
@@ -671,12 +759,19 @@ class Agent:
     def __init__(self, user_id: int, project_id: Optional[int] = None):
         self.executor = _ToolExecutor(user_id, project_id)
 
-    def run(self, message: str, history: Optional[list[dict]] = None) -> str:
-        """执行一轮对话。history: 此前 {role: user/assistant, content} 列表（不含工具消息）。"""
+    def run(self, message: str, history: Optional[list[dict]] = None,
+            context_note: Optional[str] = None) -> str:
+        """执行一轮对话。history: 此前 {role: user/assistant, content} 列表（不含工具消息）。
+
+        context_note: 代码层注入的「真实数据说明」（如项目当前任务快照），
+        作为 system 级上下文放在 user 消息之前——模型必须基于它作答，不能编造。
+        """
         messages: list[dict[str, Any]] = [{
             "role": "system",
             "content": build_system_prompt(self.executor.project_id, self.executor.project_name),
         }]
+        if context_note:
+            messages.append({"role": "system", "content": context_note})
         for h in history or []:
             messages.append({"role": h["role"], "content": h["content"]})
         messages.append({"role": "user", "content": message})

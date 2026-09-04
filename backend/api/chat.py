@@ -33,6 +33,29 @@ def _format_plan_reply(res: dict, project_name: str | None) -> str:
     return f"已为「{name}」自动规划 {len(tasks)} 个任务：\n{lines}\n{note}"
 
 
+def _format_snapshot_note(snap: dict) -> str:
+    """把项目状态快照压成给模型的 system 上下文（真实数据，禁止编造）。"""
+    d = snap.get("data", {})
+    p = d.get("project", {})
+    by = d.get("by_status", {})
+    lines = [
+        f"【项目「{p.get('name','')}」当前真实状态（已从数据库读取，回答务必基于以下数据，不得编造）】",
+        f"- 任务总数 {d.get('task_count',0)}：待办 {by.get('todo',0)} / "
+        f"进行中 {by.get('doing',0)} / 已完成 {by.get('done',0)}",
+    ]
+    high = d.get("high_open") or []
+    if high:
+        lines.append(f"- 未完成的高优先级任务：{'、'.join(high)}")
+    blocked = d.get("blocked") or []
+    if blocked:
+        lines.append("- 依赖未就绪（可能阻塞）的任务：")
+        for b in blocked[:5]:
+            lines.append(f"  · 「{b['task']}」需等「{b['waiting_on']}」（当前 {b['pre_status']}）")
+    if not (high or blocked) and d.get("task_count", 0) == 0:
+        lines.append("- 项目暂无任务，可建议用户先「帮我规划任务」。")
+    return "\n".join(lines)
+
+
 def _load_history(db: Session, user_id: int, project_id: int | None,
                   exclude_last_user_content: str | None = None) -> list[dict]:
     """取最近上下文：绑定项目时只取该项目下的消息，未绑定时取该用户全部消息。
@@ -113,6 +136,22 @@ def chat_send(body: ChatRequest, db: Session = Depends(get_db)):
             _ms = int((time.time() - _t0) * 1000)
             trace = [agent.executor.summarize_tool("plan_tasks", {}, res, _ms)]
             reply = _format_plan_reply(res, agent.executor.project_name)
+        elif action == "query":
+            # 只读进度查询：代码层先读真实项目状态注入上下文，
+            # 模型只能基于数据作答——杜绝「不查库直接泛泛而谈/编造进度」。
+            _t0 = time.time()
+            snap = agent.executor.project_snapshot()
+            _ms = int((time.time() - _t0) * 1000)
+            if snap.get("ok"):
+                trace = [agent.executor.summarize_tool("project_snapshot", {}, snap, _ms)]
+                _note = _format_snapshot_note(snap)
+            else:
+                _note = None
+            history = _load_history(db, body.user_id, body.project_id,
+                                    exclude_last_user_content=body.message)
+            reply = agent.run(body.message, history=history, context_note=_note)
+            # project_snapshot 非 LLM 工具，不会进 executor.last_trace，这里手动合并
+            trace = trace + agent.executor.last_trace
 
     # 3) 其余请求照旧走 Agent 工具循环（dispatch 内部已记录执行轨迹）
     history = _load_history(db, body.user_id, body.project_id,

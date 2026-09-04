@@ -589,3 +589,91 @@ def test_plan_tasks_creates_dependency_tree(client, monkeypatch):
     r_impact = client.get(f"/api/tasks/{a['id']}/impact").json()
     blocked_ids = {x["id"] for x in r_impact["blocked_tasks"]}
     assert blocked_ids == {b["id"], c["id"]}
+
+
+# ---------- 进度查询兜底（问进度/状态 → 代码层注入真实数据，禁止模型编造） ----------
+
+def test_chat_progress_query_injects_snapshot(client, monkeypatch):
+    """绑定项目问「进度怎么样」→ 路由层先读真实快照注入，模型回复基于数据。"""
+    from types import SimpleNamespace
+
+    p = _new_project(client, "进度查询项目")
+    _new_task(client, p["id"], "已完成任务A", status="done")
+    _new_task(client, p["id"], "进行中任务B", status="doing")
+    _new_task(client, p["id"], "待办任务C", status="todo")
+
+    seen = {"context": None}
+
+    def fake_chat(messages, tools=None, **kwargs):
+        # 断言模型收到的 system 上下文里含真实数据快照（来自代码层注入）
+        for m in messages:
+            if m["role"] == "system" and "当前真实状态" in m["content"]:
+                seen["context"] = m["content"]
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(
+                content="项目共 3 个任务：1 完成、1 进行中、1 待办，进展正常。", tool_calls=None))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+
+    r = client.post("/api/chat/send",
+                    json={"message": "项目进度怎么样了", "user_id": 1, "project_id": p["id"]})
+    assert r.status_code == 200
+    assert "3 个任务" in r.json()["reply"]
+    # 轨迹第一屏是「读取项目状态」，且注入了真实数据
+    assert r.json()["trace"][0]["tool"] == "project_snapshot"
+    assert "任务总数 3" in seen["context"]
+    assert "已完成 1" in seen["context"]
+
+
+def test_chat_progress_query_empty_project(client, monkeypatch):
+    """项目没任务时问进度 → 快照如实反映 0 任务，模型不得编造进度。"""
+    from types import SimpleNamespace
+
+    p = _new_project(client, "空进度项目")
+
+    def fake_chat(messages, tools=None, **kwargs):
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(
+                content="项目还没有任务，需要我先帮你规划一组任务吗？", tool_calls=None))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+
+    r = client.post("/api/chat/send",
+                    json={"message": "现在做到哪了", "user_id": 1, "project_id": p["id"]})
+    assert r.status_code == 200
+    assert r.json()["trace"][0]["tool"] == "project_snapshot"
+
+
+def test_chat_query_with_write_action_goes_to_tools(client, monkeypatch):
+    """「把任务B标记为完成」含写动作 → 不算进度查询，走正常 Agent 工具循环。"""
+    from types import SimpleNamespace
+
+    p = _new_project(client, "写动作项目")
+    t = _new_task(client, p["id"], "要完成的任务", status="doing")
+
+    calls = {"n": 0}
+
+    def fake_chat(messages, tools=None, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            tc = SimpleNamespace(
+                id="call_1", type="function",
+                function=SimpleNamespace(name="update_task_status",
+                                         arguments=json.dumps(
+                                             {"task_id": t["id"], "status": "done"})))
+            return SimpleNamespace(choices=[
+                SimpleNamespace(message=SimpleNamespace(content=None, tool_calls=[tc]))])
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(content="已把任务标记为完成", tool_calls=None))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+
+    r = client.post("/api/chat/send",
+                    json={"message": "把「要完成的任务」标记为完成",
+                          "user_id": 1, "project_id": p["id"]})
+    assert r.status_code == 200
+    # 走的是工具调用（update_task_status），不是 project_snapshot
+    steps = r.json()["trace"]
+    assert any(s["tool"] == "update_task_status" for s in steps)
+    assert not any(s["tool"] == "project_snapshot" for s in steps)
+    assert client.get(f"/api/tasks/{t['id']}").json()["status"] == "done"
