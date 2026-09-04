@@ -1,151 +1,201 @@
-# 项目管理 Agent（Project Manager Agent）
+# Squad · 小队智脑
 
-> 基于大语言模型（LLM）的智能项目管理助手 —— 用自然语言管理项目与任务，内置 RAG 知识库问答与可视化看板。
+> **面向 2–6 人小型研发团队的 AI 项目管理 Agent。**
+> 你说目标，Squad 自主完成项目规划、任务拆解、依赖分析、进度跟踪、风险识别与资料记忆——
+> 让没有专职 PM 的小队，也能拥有一个 24 小时在线的项目协管。
+
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.141-009688)](https://fastapi.tiangolo.com)
+[![Vue3](https://img.shields.io/badge/Vue-3.4-42b883)](https://vuejs.org)
+[![License](https://img.shields.io/badge/License-MIT-yellow)](#)
 
 ---
 
-## 一、项目简介
+## 为什么做它（背景与痛点）
 
-传统项目管理工具（Jira / Trello）功能强大但操作繁琐。本项目借助大模型理解能力，让用户**用自然语言**即可完成项目创建、任务管理与进度查询，并支持：
+小型研发团队（2–6 人）通常**没有专职 PM**：组长兼着排期、成员自己记进度、资料散落在聊天记录和本地文档里。传统项目管理工具（Jira / 禅道）为大组织设计——流程重、配置繁琐，小队用起来反而拖慢节奏，于是干脆不用。
 
-- 🗣️ **自然语言驱动**：`帮我创建一个名为「电商系统」的项目，包含 5 个任务` —— Agent 自动解析意图并执行操作
-- 🤖 **Agent 工具调用**：多轮对话中自主决策调用「建项目 / 建任务 / 改状态 / 检索知识库」等工具，链路可观测
-- 📚 **RAG 知识库问答**：上传项目文档自动分块向量化，提问时检索相关片段、基于文档作答（不编造）
-- 📋 **看板可视化**：任务按 待办 / 进行中 / 已完成 三栏展示，支持**拖拽跨栏**直接流转状态
-- 📊 **数据仪表盘**：项目 / 任务统计与状态分布一目了然
+| 小队的真实痛点 | 传统工具的做法 | Squad 的做法 |
+|---|---|---|
+| 项目目标到任务拆解全靠口头，标准不一 | 手动建任务、填字段、排优先级 | 一句话目标 → Agent **自主规划任务树**（含依赖）并入库 |
+| 进度靠站会/表格人工同步，前置延期影响说不清 | 看板手动拖拽，延期靠人肉通知 | 问"进度怎么样" → Agent **读真实数据**作答，依赖未就绪任务自动标记阻塞 |
+| 需求、会议纪要散落，新成员找不到"上次怎么定的" | 专门的文档系统，需另建库维护 | 会议纪要一键入库 → 对话时 **RAG 自动检索**注入，Agent 记得项目历史 |
+| 项目多、状态靠脑子记 | 全局仪表盘靠管理员配 | 状态实时派生，看板 / 仪表盘 / 对话三处一致 |
 
-## 二、技术栈
+**一句话**：Squad 把"管项目"从"人围着工具转"变成"Agent 围着项目转"——你只需要说，剩下交给它。
 
-| 层 | 技术 | 版本 | 用途 |
-|---|---|---|---|
-| 后端 | Python / FastAPI | 3.13 / 0.141 | Web 框架与 REST API |
-| AI | OpenAI SDK（DeepSeek 兼容端点实测） | 3.x | LLM 调用（Function Calling 工具循环） |
-| 向量库 | ChromaDB + ONNX MiniLM | 1.5.9 | 文档 Embedding 存储与 Top-K 检索 |
-| 业务库 | SQLite + SQLAlchemy | 2.0 | 六张业务表 ORM 管理 |
-| 前端 | Vue3 + Element Plus + Pinia | 3.4 / 2.7 | 看板 / 对话 / 仪表盘 / 知识库界面 |
-| 构建 | Vite | 5 | 前端工程化（dev 代理 /api → 8000） |
+---
 
-> Agent 引擎为**手写 Function Calling 工具循环**（约 200 行，见 `backend/core/agent.py`），不依赖 LangChain 黑盒：每步模型决策可打印、可调试；如需接入 LangChain 生态，仅需替换该文件内部实现。
+## Agent 核心能力（区别于普通 LLM 问答）
 
-## 三、系统架构
+Squad 不是"套壳 ChatGPT 做文本总结"，而是具备 **ReAct 闭环**的智能体：**思考（Thought）→ 选工具（Action）→ 看结果（Observation）→ 再思考**，自主完成项目管理动作。
+
+| 能力 | 说明 | 示例 |
+|---|---|---|
+| 🤖 **自主规划 Planner** | 解析自然语言目标 → 输出**带依赖关系的任务树**（depends_on 下标引用 → 落库成真实依赖边） | "帮我规划电商系统的上线" → 5 个任务 + 依赖关系自动入库 |
+| 🛠 **可插拔工具集** | Agent 按需调用 11 种工具：建任务 / 改状态 / 删改 / 查进度 / 检索资料 / 自动规划；工具按绑定项目裁剪，杜绝跨项目误操作 | "把「联调」标记完成" → 调 `update_task_status`；"删掉 XX 任务" → 调 `delete_task` |
+| 🧠 **项目长期记忆（RAG）** | Chroma 向量库存需求文档与会议纪要；绑定项目后问资料类问题 → **代码层自动检索** top-k 注入思考，不靠模型自觉 | 录入《2026-09-01 迭代评审》后问"上次怎么定的登录方案" → 命中会议纪要作答 |
+| 📊 **真实状态感知** | 问进度/状态 → Agent **先读库再作答**（状态分布、未完成高优、依赖阻塞），绝不凭空编造 | "项目进度怎么样了" → 回复基于真实任务快照 |
+| 🧾 **可观测执行轨迹** | 每一步工具调用（工具名/摘要/耗时/影响的实体）落库并在前端时间线回放，Agent 行为全程可见 | 对话下方展开"Agent 执行过程"，点击实体直达看板 |
+| 🔒 **确定性安全路由** | 高确定性场景代码层先裁决：跨项目写数据拦截、只给数量没给明细先追问、纯规划直行——把模型幻觉和串扰掐在源头 | 绑定 A 却说"给 B 规划" → 拦截提示先切换，绝不建错项目 |
+
+> 架构上刻意**手写工具循环**（约 300 行，`backend/core/agent.py`）而非套 LangChain 黑盒——每步决策可打印、可调试、可测试。
+
+---
+
+## 系统架构
 
 ```mermaid
 flowchart LR
-    U[用户] --> FE[Vue3 + Element Plus]
+    U[👤 用户] --> FE[Vue3 + Element Plus]
     FE -->|REST /api| API[FastAPI 路由层]
 
-    subgraph Agent[Agent 核心引擎]
-        API -->|POST /api/chat/send| AG[core/agent.py<br/>工具循环]
-        AG -->|tool_calls| LLM[core/llm.py<br/>DeepSeek / OpenAI 兼容]
-        AG --> EX[工具执行器<br/>services 层]
+    subgraph Agent[Squad Agent 引擎 · ReAct 闭环]
+        API -->|POST /api/chat/send| RT[确定性路由<br/>conflict/ask/plan/query/agent]
+        RT --> AG[工具循环<br/>Thought→Action→Observation]
+        AG -->|function calling| LLM[LLM · DeepSeek<br/>OpenAI 兼容]
+        AG --> EX[工具执行器<br/>services 层 · 11 工具]
+        EX -->|trace 回填| AG
     end
 
-    EX -->|CRUD| DB[(SQLite)]
+    EX -->|CRUD| DB[(SQLite<br/>Project/Task/Dependency/…)]
     EX -->|写入| RAGIN[core/rag.py]
-    RAGIN --> CH[(ChromaDB 向量库)]
-    AG -->|RAG 检索| RAGIN
-    CH --> EX
+    RAGIN --> CH[(Chroma 向量库<br/>需求文档+会议纪要)]
+    RT -.资料类问题.-> RAGIN
+    EX -->|返回| RT
     API --> EX
 
     style DB fill:#e6f7ff
     style CH fill:#f0f5ff
 ```
 
-**一次对话的执行链路**（`帮我看看电商系统有哪些营销工具`）：
-用户消息 → 落库 → 携带最近 20 条上下文组装 messages → LLM 决策「调用 search_knowledge」→ 检索 ChromaDB 命中《电商系统需求说明》片段 → 结果回填再次请求 → LLM 基于检索内容组织自然语言回答 → 回复落库返回前端。
+**一次真实对话的执行链路**（绑定项目后问"上次评审怎么定的登录方案"）：
 
-## 四、快速开始
+```
+用户消息 → 落库 → 确定性路由判定"资料类问题"
+   → 代码层自动 RAG 检索会议纪要 top-k（trace: 检索项目记忆）
+   → 命中片段注入 system 上下文
+   → LLM 基于原文组织回答 → 回复落库 + trace 回放
+```
 
-### 0. 环境要求
-- Python ≥ 3.10，Node.js ≥ 18
-- 一个 OpenAI 兼容的 LLM API Key（官方 / DeepSeek / 任一兼容中转均可）
+---
 
-### 1. 后端启动
+## 快速开始
+
+### 方式一：Docker 一键部署（推荐）
+
 ```bash
+docker compose up -d --build     # 构建并启动（前端 8080 + nginx 反代 /api）
+docker compose exec backend python seed.py    # 可选：灌入演示数据
+# 浏览器打开 http://localhost:8080
+```
+
+设计要点：后端容器**不映射宿主端口**，由 nginx 反代——彻底规避本地端口被旧进程占用的僵尸问题；SQLite + Chroma 落宿主 `./docker_data/`，`down` 不丢数据。详见 [`docs/DEPLOY_DOCKER.md`](docs/DEPLOY_DOCKER.md)。
+
+### 方式二：本地开发
+
+```bash
+# 后端（Python ≥ 3.10）
 cd backend
-cp .env.example .env        # 填写 OPENAI_API_KEY / OPENAI_BASE_URL / LLM_MODEL
+cp .env.example .env          # 填 OPENAI_API_KEY / OPENAI_BASE_URL / LLM_MODEL
 pip install -r requirements.txt
-python seed.py              # 可选：生成演示数据（1 用户 / 2 项目 / 8 任务 / 1 篇知识库文档，自动向量化）
-uvicorn main:app --reload   # http://127.0.0.1:8000  （Swagger 文档 /docs）
-```
+python seed.py                # 可选：演示数据（1 用户 / 2 项目 / 8 任务 / 1 知识库文档）
+uvicorn main:app --reload     # http://127.0.0.1:8000  Swagger: /docs
 
-运行自动化测试（可选，`pip install -r requirements-dev.txt` 后执行；LLM 已 mock，离线可跑不耗 token）：
-```bash
-python -m pytest tests/ -v    # 6 个用例：CRUD / 状态流转 / 级联删除 / 上传检索 / 对话链路
-```
-
-### 2. 前端启动
-```bash
+# 前端（Node ≥ 18）
 cd frontend
 npm install
-npm run dev                 # http://localhost:5173 （已代理 /api → 8000）
+npm run dev                   # http://localhost:5173 （已代理 /api → 后端）
 ```
 
-### 3. 体验演示
-| 入口 | 自然语言指令 | 预期行为 |
+> 💡 Windows 本地开发遇到"改了代码接口仍是旧行为/404"？先读 [`docs/DEV_OPS.md`](docs/DEV_OPS.md)——端口僵尸进程排查与"重启后探针验证"纪律。
+
+### 体验演示
+
+| 入口 | 说这句话 | 你会看到 |
 |---|---|---|
-| AI 对话 | `帮我创建一个叫「短视频运营」的项目，描述是 内容排期与数据复盘` | Agent 调用工具建项目落库 |
-| AI 对话 | `给电商系统项目加一个任务：上线前回归测试` | 自动定位项目并建任务 |
-| AI 对话（绑定电商系统） | `这个项目有哪些营销工具？` | 触发 RAG 检索知识库文档作答 |
-| 项目看板 | 拖拽任务卡片跨栏 | 状态实时流转（PATCH） |
+| AI 对话 | `帮我创建一个叫「短视频运营」的项目，描述是 内容排期与数据复盘` | Agent 调 `create_project` 建库，轨迹可见 |
+| 项目看板 | 新建项目勾选「AI 一键规划」 | 任务树（含依赖）自动生成 |
+| AI 对话（绑定项目） | `项目进度怎么样了` | 轨迹首屏"读取项目状态"，回复基于真实数据 |
+| AI 对话（绑定项目） | `删掉「XX」任务` / `把「XX」改名为 YY` | 调 `delete_task` / `update_task_fields` |
+| AI 对话（绑定项目） | 上传会议纪要后问 `上次怎么定的登录方案` | 轨迹首屏"检索项目记忆"，按原文作答 |
+| 数据仪表盘 | — | 任务/项目状态实时派生，与看板一致 |
 
-演示账号：seed 内置 `alice`（user_id=1，无登录体系，demo 用）。
+---
 
-> 💡 **本地开发遇到"改了代码但接口仍是旧行为/404"** → 先读 [`docs/DEV_OPS.md`](docs/DEV_OPS.md)（Windows 端口僵尸进程排查、重启协议、行为探针验证纪律）。
+## 技术栈
 
-## 五、目录结构
+| 层 | 技术 | 用途 |
+|---|---|---|
+| 后端 | Python / FastAPI | Web 框架与 REST API |
+| AI | OpenAI SDK（DeepSeek 兼容端点实测） | LLM 调用 + Function Calling 工具循环 |
+| 向量库 | ChromaDB + ONNX MiniLM | 文档/会议纪要 Embedding 与 Top-K 检索 |
+| 业务库 | SQLite + SQLAlchemy | 七张业务表 ORM 管理 + 轻量迁移 |
+| 前端 | Vue3 + Element Plus + Pinia | 看板 / 对话 / 仪表盘 / 知识库界面 |
+| 部署 | Docker Compose + Nginx | 前后端容器化、反代、数据卷持久化 |
+
+## 数据模型（核心表）
+
+`users` / `projects` / `tasks` / `task_dependencies` / `task_comments` / `chat_messages` / `knowledge_documents`
+
+- **TaskDependency**：任务依赖建模（task 依赖 depends_on 前置任务），服务层校验**自依赖 / 跨项目 / 成环**，支持"前置延期 → 影响哪些下游"的影响分析（`/api/tasks/{id}/impact`）
+- **KnowledgeDocument.doc_type**：`doc`（需求/方案文档）与 `meeting`（会议纪要，项目长期记忆）同库分型
+- **ChatMessage.trace**：Agent 执行轨迹 JSON（每步工具 + 受影响实体），历史消息可回放
+
+## 目录结构
 
 ```
 project-manager-agent/
-├── backend/                  # Python 后端
-│   ├── main.py               # FastAPI 入口（启动建表 + 路由注册）
-│   ├── seed.py               # 演示数据脚本（幂等）
-│   ├── core/                 # 核心模块
-│   │   ├── config.py         # .env 集中配置（路径锚定 backend）
-│   │   ├── agent.py          # Agent 工具循环（手写 Function Calling）
-│   │   ├── llm.py            # LLM 统一封装
-│   │   └── rag.py            # ChromaDB 入库/检索/清理
-│   ├── models/               # database.py（六表 ORM）/ schemas.py（Pydantic v2）
-│   ├── services/             # 业务服务层（API 与 Agent 共用）
-│   └── api/                  # REST 路由（projects / tasks / knowledge / chat）
-├── frontend/                 # Vue3 前端
-│   └── src/
-│       ├── views/            # Dashboard / ProjectBoard / ChatView / KnowledgeBase
-│       ├── components/       # Sidebar / TaskCard / ChatMessage
-│       ├── stores/           # Pinia（项目状态）
-│       └── api/index.js      # axios 封装
-└── sql/init.sql              # 数据库初始化脚本（与 ORM 对齐）
+├── backend/
+│   ├── main.py              # FastAPI 入口（启动建表 + 轻量迁移）
+│   ├── core/
+│   │   ├── agent.py         # ★ ReAct 工具循环 + 工具定义 + 确定性路由（~700 行）
+│   │   ├── llm.py           # ★ LLM 封装：chat / chat_text / chat_json（JSON 校验+重试）
+│   │   ├── rag.py           # Chroma 分块入库 / 按项目检索 / 同步清理
+│   │   └── config.py        # .env 集中配置
+│   ├── services/            # 业务服务层（API 与 Agent 共用）
+│   ├── api/                 # REST 路由（projects/tasks/knowledge/chat/plan/impact）
+│   └── tests/               # pytest 37 用例（LLM mock，离线可跑）
+├── frontend/src/            # Vue3：Dashboard / ProjectBoard / ChatView / KnowledgeBase
+├── docs/                    # DEV_OPS.md（本地运维）/ DEPLOY_DOCKER.md（容器部署）
+└── docker-compose.yml       # 一键部署
 ```
 
-## 六、API 一览
+---
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET/POST | `/api/projects` | 项目列表 / 创建（?user_id=） |
-| PATCH/DELETE | `/api/projects/{id}` | 更新 / 删除（级联清理任务与向量） |
-| GET/POST | `/api/tasks?project_id=` | 任务列表 / 创建 |
-| PATCH/DELETE | `/api/tasks/{id}` | 状态流转（拖拽） / 删除 |
-| GET/POST | `/api/projects/{pid}/documents` | 知识库文档列表 / 上传（multipart，自动向量化） |
-| DELETE | `/api/documents/{id}` | 删除文档（同步清向量） |
-| POST | `/api/chat/send` | 自然语言对话（Agent 全链路） |
-| GET | `/api/chat/history` | 对话历史 |
+## 工程化亮点（LLM 稳定性）
 
-交互式文档：后端启动后访问 `/docs`。
+- **JSON 结构化输出容错**（`llm.chat_json`）：自动追加"只输出 JSON"约束 → 剥离 ```json 围栏 → 容忍前后夹带文字截取合法片段 → 解析失败把原始输出+错误回传**引导模型自纠错重试** → 仍失败返回错误不抛异常
+- **确定性路由先于模型**：跨项目冲突 / 只给数量没明细 / 纯规划 / 进度查询，四类高确定性场景由代码裁决，把模型幻觉与串扰掐在源头
+- **Agent 可观测**：每步工具调用（名称/摘要/耗时/影响实体）写入 trace，前端时间线回放——面试可现场演示"Agent 每一步在干什么"
 
-## 七、数据模型（六张表）
+---
 
-`users` / `projects` / `tasks` / `task_comments` / `chat_messages` / `knowledge_documents`
-关联：用户 1-N 项目；项目 1-N 任务与知识库文档；任务 1-N 评论；任务可指派用户。业务数据存 SQLite，文档向量存 ChromaDB，两库由 services 层保持一致性（删除项目/文档时同步清理向量）。
+## 实现状态
 
-## 八、国内环境注意事项
+- [x] ReAct 工具循环：Thought→Action→Observation，11 种工具，最大 8 轮防死循环
+- [x] Planner：自然语言目标 → 带依赖任务树（depends_on 下标 → 真实依赖边）
+- [x] 任务依赖建模：TaskDependency 表 + 成环/跨项目校验 + 影响分析
+- [x] 项目长期记忆：会议纪要/需求文档入库，资料类问题自动 RAG 注入
+- [x] 真实状态感知：进度查询先读库再作答（快照注入，禁止编造）
+- [x] 能力开放：删除 / 编辑 / 改名类自然语言映射工具（决策表 prompt）
+- [x] LLM 工程化：chat_json 结构化输出 + 解析失败重试
+- [x] 可观测：执行轨迹 trace + 实体引用跳看板 + 一键演示
+- [x] 前端：仪表盘（派生完成度）/ 看板（拖拽流转）/ AI 对话 / 知识库
+- [x] Docker 一键部署 + nginx 反代 + 数据卷持久化
+- [x] 质量：pytest **37 用例**（LLM mock 离线，CI 可跑）
+- [ ] Roadmap：Risk 风险登记与自动评估 / 迭代周报生成 / SSE 流式输出 / Agent 记忆压缩
 
-- npm 建议使用镜像源：`npm config set registry https://registry.npmmirror.com`
-- ChromaDB 内置 ONNX 模型默认从 AWS S3 下载（国内易超时）。若首次运行报下载超时，可将 `sentence-transformers/all-MiniLM-L6-v2` 的 6 个文件（config.json / model.onnx / special_tokens_map.json / tokenizer_config.json / tokenizer.json / vocab.txt，经 hf-mirror.com 获取）放置到 `~/.cache/chroma/onnx_models/all-MiniLM-L6-v2/onnx/` 即可跳过下载。
+---
 
-## 九、实现状态
+## 常见问题
 
-- [x] P1 后端核心：LLM 调用 / 数据层 / 向量库 RAG / 业务 API / Agent 链路（端到端验收通过）
-- [x] P2 前端：仪表盘 / 看板拖拽 / AI 对话 / 知识库管理（与后端联调通过）
-- [x] Agent 增强：任务自动规划（plan_tasks）、防误建同名项目护栏、多轮上下文（最近 20 条）
-- [x] 工程质量：后端 pytest API 冒烟测试 6 用例（离线 mock LLM，`python -m pytest tests/ -v`）
-- [ ] P3 打磨：部署上线可访问 Demo / Element Plus 按需引入优化
+**Q：和直接用 ChatGPT 问有什么区别？**
+A：Squad 是**有状态、能动手**的 Agent——它真的会往数据库建项目/任务/依赖、读真实进度作答、检索你的会议纪要，且每步动作可见可回放；普通问答既无持久化状态，也无法操作业务数据。
+
+**Q：会不会模型乱说话/建错数据？**
+A：三层防护——① 高确定性场景代码先裁决（跨项目拦截/追问明细/规划直行）；② 写操作前必须查到真实 id，对象不明先列出来问；③ 每步工具调用落 trace，出错可回放定位。
+
+---
+
+**License** MIT · 一个面向小队的 AI 项目协管实验 —— 有问题欢迎提 Issue。
