@@ -47,6 +47,15 @@ export const knowledgeApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+  // 录入会议纪要（后端自动向量化 → 项目长期记忆，可被 Agent RAG 检索）
+  meeting: (projectId, title, content) => {
+    const form = new FormData()
+    form.append('title', title)
+    form.append('content', content)
+    return http.post(`/projects/${projectId}/meetings`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
   remove: (docId) => http.delete(`/documents/${docId}`),
 }
 
@@ -60,6 +69,9 @@ export const chatApi = {
         ? { user_id: USER_ID, project_id: projectId }
         : { user_id: USER_ID },
     }),
+  // 把本项目最近的对话整理成会议纪要存入资料库（页面「存为纪要」按钮）
+  meetingSummary: (projectId) =>
+    http.post('/chat/meeting-summary', { user_id: USER_ID, project_id: projectId }),
 }
 
 export default http

@@ -8,6 +8,12 @@
       <span class="hint">
         {{ bindProject ? '已绑定项目：Agent 会优先检索该项目知识库' : '未绑定项目：可让 Agent 创建/管理任意项目' }}
       </span>
+      <el-tooltip :content="bindProject ? '把本次对话结论整理成会议纪要，存入资料库' : '需先绑定项目才能归档纪要'" placement="top">
+        <span>
+          <el-button :icon="DocumentAdd" :disabled="!bindProject || !messages.length" :loading="savingNote"
+                     @click="saveMeeting">存为纪要</el-button>
+        </span>
+      </el-tooltip>
       <el-button :icon="Refresh" circle title="清空会话" @click="resetChat" />
     </div>
 
@@ -54,6 +60,14 @@
       </div>
     </div>
 
+    <!-- 半自动沉淀提示：检测到结论/决策型回复且执行过工具 → 询问是否入库，不自动乱存 -->
+    <div v-if="bindProject && suggestVisible && messages.length" class="suggest">
+      <el-icon color="#e6a23c"><InfoFilled /></el-icon>
+      <span class="suggest-text">检测到本次对话可能含有值得沉淀的结论/决策，是否整理成会议纪要存入资料库（Agent 之后可自动检索）？</span>
+      <el-button size="small" type="primary" :loading="savingNote" @click="saveMeeting">整理入库</el-button>
+      <el-button size="small" text @click="suggestVisible = false">暂不</el-button>
+    </div>
+
     <!-- 输入区 -->
     <div class="input-bar">
       <el-input
@@ -75,7 +89,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Promotion, Refresh } from '@element-plus/icons-vue'
+import { Promotion, Refresh, DocumentAdd, InfoFilled } from '@element-plus/icons-vue'
 import { chatApi, taskApi } from '../api'
 import { useProjectStore } from '../stores/project'
 import ChatMessage from '../components/ChatMessage.vue'
@@ -87,6 +101,8 @@ const draft = ref('')
 const loading = ref(false)
 const bindProject = ref(null)
 const demoBusy = ref(false)
+const savingNote = ref(false)      // 「存为纪要」请求中
+const suggestVisible = ref(false)  // 半自动沉淀提示条是否显示
 const scrollRef = ref(null)
 
 // 空态示例：优先以「当前绑定/首个项目」真实名称生成，保证点下去一定有效
@@ -119,8 +135,35 @@ async function loadHistory(projectId = null) {
 // 切换绑定项目 -> 加载该项目自己的对话上下文（防止跨项目串扰）；演示脚本运行时跳过
 watch(bindProject, (val) => {
   if (demoBusy.value) return
+  suggestVisible.value = false
   loadHistory(val)
 })
+
+// 半自动沉淀：仅当本轮回复「执行过写类工具」且文字含结论/决策类信号时提示，避免打扰
+const SUGGEST_RE = /结论|决策|决定|确定|采用|约定|待办|风险|下一步|方案/
+function maybeSuggest(text, trace) {
+  if (!bindProject.value || suggestVisible.value || demoBusy.value) return
+  const writeSteps = (trace || []).filter(
+    (s) => s.ok && !['none', 'search_knowledge', 'list_tasks', 'list_projects'].includes(s.tool),
+  )
+  if (!writeSteps.length) return  // 纯查询/闲聊不提示
+  if (!SUGGEST_RE.test(text || '')) return
+  suggestVisible.value = true
+}
+
+async function saveMeeting() {
+  if (!bindProject.value) return ElMessage.warning('请先绑定项目后再归档纪要')
+  savingNote.value = true
+  try {
+    const r = await chatApi.meetingSummary(bindProject.value)
+    ElMessage.success(`已把对话沉淀为会议纪要「${r.title}」，可在知识库页查看`)
+    suggestVisible.value = false
+  } catch (e) {
+    ElMessage.error('保存失败：' + e.message)
+  } finally {
+    savingNote.value = false
+  }
+}
 
 async function send(text) {
   const content = (text ?? draft.value).trim()
@@ -132,6 +175,7 @@ async function send(text) {
   try {
     const res = await chatApi.send(content, bindProject.value)
     messages.value.push({ role: 'assistant', content: res.reply, trace: res.trace || [] })
+    maybeSuggest(res.reply, res.trace || [])
   } catch (e) {
     messages.value.push({ role: 'assistant', content: `⚠️ 出错了：${e.message}` })
   } finally {
@@ -174,6 +218,7 @@ async function runDemo() {
 
 function resetChat() {
   messages.value = [] // 仅清空当前视图会话（绑定项目由选择器控制）
+  suggestVisible.value = false
 }
 
 function scrollToBottom() {
@@ -209,6 +254,17 @@ onMounted(async () => {
   border-radius: 10px;
 }
 .typing { opacity: 0.7; }
+.suggest {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: #fdf6ec;
+  border: 1px solid #f5dab1;
+  border-radius: 8px;
+}
+.suggest-text { flex: 1; color: #b88230; font-size: 13px; line-height: 1.6; }
 .input-bar { display: flex; gap: 10px; margin-top: 12px; align-items: flex-end; }
 .input-bar .el-textarea { flex: 1; }
 </style>

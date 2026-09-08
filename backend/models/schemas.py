@@ -155,6 +155,12 @@ class ChatRequest(BaseModel):
     project_id: Optional[int] = None  # 传入时：对话绑定某项目（用于 RAG 检索该项目的文档）
 
 
+class MeetingSummaryRequest(BaseModel):
+    """前端「把本次对话存为纪要」按钮 → POST /api/chat/meeting-summary"""
+    user_id: int
+    project_id: int  # 纪要按项目归档，必须显式指定绑定项目
+
+
 class ChatMessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

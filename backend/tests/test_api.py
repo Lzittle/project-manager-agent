@@ -792,6 +792,78 @@ def test_chat_memory_inject_failure_silent(client, monkeypatch):
     assert r.json()["reply"] == "正常回答"
 
 
+def test_meeting_summary_endpoint(client, monkeypatch):
+    """「把本次对话存为纪要」链路：对话历史 → LLM 摘要 → doc_type=meeting 入库。"""
+    from types import SimpleNamespace
+    p = _new_project(client, "纪要沉淀项目")
+
+    def fake_chat(messages, tools=None, **kwargs):
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(content="好的，按结论执行。", tool_calls=None))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+    # 先沉淀两轮真实对话（作为可归档内容）
+    for msg in ("确定采用手机号验证码登录，不做第三方", "验收标准按 200ms 延迟执行"):
+        r = client.post("/api/chat/send",
+                        json={"message": msg, "user_id": 1, "project_id": p["id"]})
+        assert r.status_code == 200
+
+    # LLM 摘要打桩：直接返回结构化纪要
+    monkeypatch.setattr("core.llm.chat_json", lambda *a, **kw: (
+        {"title": "2026-09-08 登录方案讨论",
+         "content": "【结论】采用手机号验证码登录。\n【验收】延迟低于 200ms。"}, None))
+
+    r = client.post("/api/chat/meeting-summary",
+                    json={"user_id": 1, "project_id": p["id"]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] and body["doc_id"]
+
+    docs = client.get(f"/api/projects/{p['id']}/documents").json()
+    meeting = [d for d in docs if d["id"] == body["doc_id"]]
+    assert meeting and meeting[0]["doc_type"] == "meeting"
+    assert "验证码" in meeting[0]["content"]
+
+    # 无对话历史 → 400
+    p2 = _new_project(client, "空对话项目")
+    r2 = client.post("/api/chat/meeting-summary",
+                     json={"user_id": 1, "project_id": p2["id"]})
+    assert r2.status_code == 400
+
+
+def test_save_meeting_tool_via_chat(client, monkeypatch):
+    """显式指令（「把结论记下来」）→ Agent 调 save_meeting 工具 → 纪要入库 + 轨迹可见。"""
+    from types import SimpleNamespace
+    p = _new_project(client, "工具纪要项目")
+
+    def fake_chat(messages, tools=None, **kwargs):
+        # 第一轮：模型决定调用 save_meeting；下一轮（带 tool 结果）直接收尾
+        if messages and messages[-1]["role"] == "tool":
+            return SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(content="已把结论整理成会议纪要存入知识库，之后可随时问我。",
+                                        tool_calls=None))])
+        tc = SimpleNamespace(
+            id="call-m1", type="function",
+            function=SimpleNamespace(
+                name="save_meeting",
+                arguments='{"title":"2026-09-08 登录方案结论","content":"【结论】采用验证码登录，不做第三方。"}'))
+        return SimpleNamespace(choices=[SimpleNamespace(
+            message=SimpleNamespace(content=None, tool_calls=[tc]))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+
+    r = client.post("/api/chat/send",
+                    json={"message": "把刚才讨论的登录方案结论记下来，存成会议纪要",
+                          "user_id": 1, "project_id": p["id"]})
+    assert r.status_code == 200
+    steps = r.json()["trace"]
+    assert any(s["tool"] == "save_meeting" and s["ok"] for s in steps)
+
+    # 纪要确实入库（doc_type=meeting）
+    docs = client.get(f"/api/projects/{p['id']}/documents").json()
+    assert any(d["doc_type"] == "meeting" and "验证码" in d["content"] for d in docs)
+
+
 # ---------- 上下文感知规划（防重复 / 读记忆 / 数量自适应） ----------
 
 def _capture_plan_ctx(client, monkeypatch, project_id, existing_title="", rag_hits=None):

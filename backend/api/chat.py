@@ -10,14 +10,15 @@ import json
 import re
 import time
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from core import llm
 from core.agent import Agent, resolve_bound_action, is_ask_detail_intent
 from core.rag import search as rag_search
 from models.database import get_db, ChatMessage
-from models.schemas import ChatRequest, ChatMessageOut
-from services import project_service
+from models.schemas import (ChatRequest, ChatMessageOut, MeetingSummaryRequest)
+from services import knowledge_service, project_service
 
 router = APIRouter()
 
@@ -240,3 +241,47 @@ def chat_history(user_id: int = Query(...),
         out.append(ChatMessageOut(id=m.id, role=m.role, content=m.content,
                                   created_at=m.created_at, trace=trace))
     return out
+
+
+@router.post("/meeting-summary")
+def meeting_summary(body: MeetingSummaryRequest, db: Session = Depends(get_db)):
+    """前端「把本次对话存为纪要」按钮：将该项目最近的对话整理成会议纪要入库。
+
+    与 Agent 的 save_meeting 工具区别：本接口由页面按钮直接触发、不经过对话轮次，
+    对最近对话历史做一次 LLM 结构化摘要后落 doc_type=meeting（自动向量化进长期记忆）。
+    """
+    if project_service.get_project(db, body.project_id) is None:
+        raise HTTPException(404, f"项目 {body.project_id} 不存在")
+    history = _load_history(db, body.user_id, body.project_id)
+    exchanges = [
+        f"{'用户' if h['role'] == 'user' else '助手'}: {h['content']}"
+        for h in history if h["content"] and h["content"].strip()
+    ]
+    if len(exchanges) < 2:
+        raise HTTPException(400, "当前对话内容太少，暂无可沉淀的结论")
+    transcript = "\n".join(exchanges[-20:])
+
+    try:
+        parsed, jerr = llm.chat_json([
+            {"role": "system", "content":
+             "你是团队记录助手。把下面的对话记录整理成一份结构化会议纪要，"
+             "提取其中真正有保存价值的结论、决策、待办、风险与共识；"
+             "不要收录寒暄与无关闲谈。"
+             "输出 JSON：{\"title\":\"纪要主题（建议含日期，形如「2026-09-08 XX 讨论」，不超过 30 字）\","
+             "\"content\":\"纪要正文\"}。"
+             "正文用分节要点列出（【结论】【决策】【待办】【风险】等），"
+             "只能依据对话中真实出现的内容，不得编造。"},
+            {"role": "user", "content": f"对话记录：\n{transcript}"},
+        ], temperature=0.3, max_tokens=1200)
+    except Exception as e:
+        raise HTTPException(502, f"纪要生成失败: {e}")
+    if jerr is not None or not isinstance(parsed, dict) or not str(parsed.get("title") or "").strip():
+        raise HTTPException(502, f"纪要生成失败（模型输出无法解析：{jerr or '空结果'}），请重试")
+
+    title = str(parsed["title"]).strip()[:200]
+    content = str(parsed.get("content") or "").strip()
+    doc = knowledge_service.create_document(db, body.project_id, title,
+                                            content or transcript,
+                                            file_type="txt", doc_type="meeting")
+    return {"ok": True, "doc_id": doc.id, "title": doc.title,
+            "created_at": doc.created_at.isoformat() if doc.created_at else None}

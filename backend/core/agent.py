@@ -20,7 +20,7 @@ from typing import Any, Optional
 from core import llm
 from core.rag import search as rag_search
 from models.database import SessionLocal, Project
-from services import project_service, task_service
+from services import knowledge_service, project_service, task_service
 
 MAX_ITER = 8  # 单轮最多工具迭代次数，防死循环
 
@@ -45,7 +45,9 @@ def build_system_prompt(project_id: Optional[int] = None,
    - 删除/移除/清理/划掉任务 → delete_task；删除/移除项目 → delete_project；
    - 改标题/改描述/优化/调优先级/改名 → update_task_fields / update_project_fields；
    - 执行删除/修改前先用 list_tasks/list_projects 查到真实 id，对象不明确就先列出来问用户，绝不猜 id；
-   - 用户只说「加 N 个任务」却没给内容时，先请用户补充内容，绝不自动规划一整套。"""
+   - 用户只说「加 N 个任务」却没给内容时，先请用户补充内容，绝不自动规划一整套；
+   - 用户说「把结论记下来/存成会议纪要/归档/记进资料库/沉淀一下」→ 调用 save_meeting，
+     把本次对话中双方确认过的结论/决策/下一步行动整理成纪要入库（内容忠于本次对话，不得编造）。"""
     if project_id is not None:
         name_desc = f"，名称「{project_name}」" if project_name else ""
         prompt += (
@@ -282,6 +284,20 @@ TOOLS: list[dict] = [
         {"query": {"type": "string", "description": "检索问题"},
          "project_id": {"type": "integer", "description": "限定项目（可空）"}},
         ["query"],
+    ),
+    _fn(
+        "save_meeting",
+        "把当前对话中已确认的结论/决策/下一步行动整理成一份会议纪要，存入项目知识库作为长期记忆"
+        "（后续问「上次怎么定的/纪要里怎么说」可被自动检索）。"
+        "仅用于用户明确要求记录/归档的场合（如「把结论记下来/存成纪要/记进资料库」）。"
+        "title 给纪要起主题（建议含日期，如「2026-09-08 迭代评审」）；"
+        "content 用结构化要点概括本次对话中双方确认过的内容（结论/决策/待办/风险），"
+        "必须忠于对话内容，不得编造未讨论的信息。"
+        "project_id 可省略：省略时默认当前绑定的项目（若未绑定则必须提供）",
+        {"project_id": {"type": "integer", "description": "要归档纪要的项目 id（可省略，默认当前绑定项目）"},
+         "title": {"type": "string", "description": "纪要主题（建议含日期）"},
+         "content": {"type": "string", "description": "纪要正文：结论/决策/待办的结构化要点"}},
+        ["title", "content"],
     ),
     _fn(
         "plan_tasks",
@@ -552,6 +568,29 @@ class _ToolExecutor:
         except Exception as e:  # embedding 模型未就绪等场景
             return {"ok": False, "error": f"知识库检索失败: {e}"}
 
+    def save_meeting(self, title: str, content: str,
+                     project_id: Optional[int] = None) -> dict:
+        """把对话结论整理成会议纪要入库（doc_type=meeting，自动向量化进项目长期记忆）。"""
+        pid = project_id or self.project_id
+        if pid is None:
+            return {"ok": False, "error": "未指定项目：请先绑定项目或在话术中说明项目名称"}
+        t = (title or "").strip()
+        if not t:
+            return {"ok": False, "error": "纪要标题不能为空"}
+        db = SessionLocal()
+        try:
+            doc = knowledge_service.create_document(
+                db, pid, t[:200], (content or "").strip(), file_type="txt", doc_type="meeting")
+            if doc is None:
+                return {"ok": False, "error": f"项目 {pid} 不存在"}
+            return {"ok": True,
+                    "data": {"id": doc.id, "title": doc.title,
+                             "doc_type": doc.doc_type, "project_id": pid},
+                    "note": "已作为会议纪要存入项目知识库（自动向量化），"
+                            "之后问「上次怎么定的」即可自动检索到"}
+        finally:
+            db.close()
+
     # ---------- 执行轨迹（让每一步工具调用对用户可见、可跳转） ----------
     _LABELS = {
         "create_project": "创建项目", "list_projects": "查看项目列表",
@@ -560,7 +599,7 @@ class _ToolExecutor:
         "plan_tasks": "自动规划任务",
         "delete_task": "删除任务", "delete_project": "删除项目",
         "update_task_fields": "编辑任务", "update_project_fields": "编辑项目",
-        "project_snapshot": "读取项目状态",
+        "project_snapshot": "读取项目状态", "save_meeting": "保存会议纪要",
     }
     _TASK_TOOLS = {"create_task", "update_task_status", "delete_task", "update_task_fields"}
     _PROJECT_TOOLS = {"create_project", "delete_project", "update_project_fields"}
@@ -623,6 +662,8 @@ class _ToolExecutor:
                       f"完成 {s.get('by_status',{}).get('done',0)}")
         elif name == "search_knowledge" and isinstance(data, list):
             detail = f"检索到 {len(data)} 条相关片段" if data else "知识库暂无相关内容"
+        elif name == "save_meeting" and isinstance(data, dict):
+            detail = f"纪要「{data.get('title','')}」已存入知识库"
         else:
             detail = f"{label}完成"
         step = {"tool": name, "label": label, "detail": _clip(detail, 120),
