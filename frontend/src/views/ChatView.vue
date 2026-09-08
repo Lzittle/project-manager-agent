@@ -24,6 +24,7 @@
 
     <!-- 空态引导（无消息时：能力说明 + 从真实项目动态生成的示例） -->
     <div v-if="!messages.length && !loading" class="guide">
+      <div class="guide-eyebrow">SQUAD · 小队智脑</div>
       <div class="guide-title">和你的项目管理 Agent 对话</div>
       <div class="guide-sub">用一句话下指令，Agent 会自动调用工具把事办成，过程全程可见：</div>
       <ul class="guide-bullets">
@@ -243,8 +244,15 @@ onMounted(async () => {
 .chat-page { display: flex; flex-direction: column; height: calc(100vh - 130px); }
 .chat-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
 .hint { color: var(--el-text-color-secondary); font-size: 13px; flex: 1; }
-.guide { padding: 40px 24px 8px; }
-.guide-title { font-size: 20px; font-weight: 700; color: var(--el-text-color-primary); text-align: center; }
+.guide { padding: 44px 24px 8px; }
+.guide-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--el-color-primary);
+  text-align: center;
+  margin-bottom: 8px;
+}
+.guide-title { font-size: 22px; font-weight: 700; color: var(--el-text-color-primary); text-align: center; letter-spacing: -0.01em; }
 .guide-sub { color: var(--el-text-color-secondary); font-size: 13px; text-align: center; margin: 8px 0 18px; }
 .guide-bullets { max-width: 540px; margin: 0 auto; padding-left: 20px; color: var(--el-text-color-regular); font-size: 13px; line-height: 2.1; }
 .guide-actions { display: flex; justify-content: center; margin-top: 20px; }

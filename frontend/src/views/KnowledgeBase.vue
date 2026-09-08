@@ -1,34 +1,36 @@
 <template>
   <div>
-    <div class="toolbar">
-      <el-select v-model="store.currentId" placeholder="选择项目" style="width: 260px" @change="loadDocs">
-        <el-option
-          v-for="row in store.treeRows"
-          :key="row.id"
-          :value="row.id"
-          :label="(row.depth > 1 ? '\u3000'.repeat(row.depth - 1) + '└ ' : '') + row.name"
-        />
-      </el-select>
-      <el-upload
-        drag
-        :auto-upload="false"
-        :show-file-list="false"
-        accept=".txt,.md"
-        :on-change="onFileChange"
-        style="flex: 1"
-      >
-        <div style="padding: 8px 0">
-          <el-icon :size="28" color="var(--el-color-primary)"><UploadFilled /></el-icon>
-          <div class="upload-text">拖入或点击上传 .txt / .md 文档（UTF-8），自动进入知识库可被 Agent 检索</div>
-        </div>
-      </el-upload>
-      <el-button type="primary" :icon="Upload" :loading="uploading" :disabled="!file" @click="doUpload">
-        上传
-      </el-button>
-      <el-button type="primary" plain :icon="DocumentAdd" @click="openMeetingDlg">
-        录入会议纪要
-      </el-button>
-    </div>
+    <el-card shadow="never" class="kb-inlet">
+      <div class="toolbar">
+        <el-select v-model="store.currentId" placeholder="选择项目" style="width: 240px" @change="loadDocs">
+          <el-option
+            v-for="row in store.treeRows"
+            :key="row.id"
+            :value="row.id"
+            :label="(row.depth > 1 ? '\u3000'.repeat(row.depth - 1) + '└ ' : '') + row.name"
+          />
+        </el-select>
+        <el-upload
+          drag
+          :auto-upload="false"
+          :show-file-list="false"
+          accept=".txt,.md"
+          :on-change="onFileChange"
+          style="flex: 1"
+        >
+          <div style="padding: 6px 0">
+            <el-icon :size="26" color="var(--el-color-primary)"><UploadFilled /></el-icon>
+            <div class="upload-text">拖入或点击上传 .txt / .md 文档（UTF-8），自动进入知识库可被 Agent 检索</div>
+          </div>
+        </el-upload>
+        <el-button type="primary" :icon="Upload" :loading="uploading" :disabled="!file" @click="doUpload">
+          上传
+        </el-button>
+        <el-button type="primary" plain :icon="DocumentAdd" @click="openMeetingDlg">
+          录入会议纪要
+        </el-button>
+      </div>
+    </el-card>
 
     <el-card shadow="never" v-loading="loading">
       <el-table :data="docs" size="default" row-key="id">
@@ -168,7 +170,8 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+.kb-inlet { margin-bottom: 16px; border-radius: var(--squad-radius-card); }
+.toolbar { display: flex; gap: 12px; align-items: center; }
 .upload-text { color: var(--el-text-color-secondary); font-size: 13px; line-height: 1.8; }
 .doc-preview {
   white-space: pre-wrap;

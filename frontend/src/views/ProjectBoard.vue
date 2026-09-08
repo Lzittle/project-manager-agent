@@ -55,9 +55,13 @@
         @drop="onDrop($event, col.status)"
       >
         <div class="col-head">
-          <span class="col-dot" :style="{ background: col.color }" />
+          <i class="col-dot" :style="{ background: col.color }" />
           <span class="col-title">{{ col.label }}</span>
-          <el-tag size="small" round>{{ tasksBy(col.status).length }}</el-tag>
+          <span class="col-count">{{ tasksBy(col.status).length }}</span>
+          <span v-if="tasks.length" class="col-share">{{ shareOf(col.status) }}%</span>
+        </div>
+        <div class="col-strip">
+          <i :style="{ width: tasks.length ? shareOf(col.status) + '%' : '0%', background: col.color }" />
         </div>
         <div class="col-body">
           <TaskCard
@@ -150,6 +154,10 @@ const taskDlg = reactive({ visible: false, title: '', description: '', priority:
 const projDlg = reactive({ visible: false, parentId: null, name: '', description: '', autoPlan: true, submitting: false })
 
 const tasksBy = (status) => tasks.value.filter((t) => t.status === status)
+// 该状态任务占总数比例（列头叙事：一眼看出负载分布）
+const shareOf = (status) => (tasks.value.length
+  ? Math.round((tasksBy(status).length / tasks.value.length) * 100)
+  : 0)
 
 // ---------- 层级辅助 ----------
 // 树形下拉的缩进标签（子项目前加“└”并缩进）
@@ -302,9 +310,9 @@ onMounted(async () => {
   gap: 10px;
   margin-bottom: 12px;
   padding: 8px 12px;
-  background: #fff;
+  background: var(--el-bg-color);
   border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
+  border-radius: var(--squad-radius-card);
 }
 .crumb-link { color: var(--el-color-primary); cursor: pointer; font-weight: 500; }
 .crumb-now { color: var(--el-text-color-primary); font-weight: 600; }
@@ -313,16 +321,27 @@ onMounted(async () => {
 .proj-desc { color: var(--el-text-color-secondary); font-size: 13px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }
 .board-col {
-  background: var(--el-border-color-lighter);
-  border-radius: 10px;
-  padding: 12px;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--squad-radius-card);
+  padding: 14px;
   min-height: 320px;
-  transition: background 0.2s;
+  transition: background 0.2s, border-color 0.2s;
 }
-.board-col.drop-over { background: #e0e7ff; outline: 2px dashed #4f46e5; }
-.col-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.col-dot { width: 10px; height: 10px; border-radius: 50%; }
-.col-title { font-weight: 600; color: var(--el-text-color-primary); }
+.board-col.drop-over { background: #eef1ff; border-color: var(--el-color-primary); }
+.col-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.col-dot { width: 8px; height: 8px; border-radius: 50%; align-self: center; }
+.col-title { font-weight: 600; color: var(--el-text-color-primary); font-size: 14px; }
+.col-count {
+  font-size: 12px; font-weight: 600; color: var(--el-text-color-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.col-share { font-size: 12px; color: var(--el-text-color-placeholder); margin-left: auto; font-variant-numeric: tabular-nums; }
+.col-strip {
+  height: 3px; border-radius: 3px; background: var(--el-border-color-extra-light);
+  overflow: hidden; margin-bottom: 12px;
+}
+.col-strip i { display: block; height: 100%; border-radius: 3px; opacity: 0.85; transition: width 0.3s var(--squad-ease); }
 .col-body { min-height: 200px; }
 .dlg-tip { color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.5; margin-top: 4px; }
 </style>
