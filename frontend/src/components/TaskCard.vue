@@ -8,10 +8,10 @@
   >
     <div class="tc-head">
       <span class="tc-pri" :class="task.priority">{{ priText }}</span>
-      <span v-if="isBlocked" class="tc-blocked" title="存在未完成的前置任务，无法开工">
-        <el-icon><Lock /></el-icon> 依赖阻塞
+      <span v-if="isBlocked" class="tc-blocked" title="前置任务尚未完成，完成后即可开工">
+        <el-icon><Lock /></el-icon> 待解锁
       </span>
-      <span v-else-if="task.depends_on?.length" class="tc-dep" title="依赖前置任务完成">
+      <span v-else-if="task.depends_on?.length" class="tc-dep" title="有前置任务待完成">
         <el-icon><Link /></el-icon> {{ task.depends_on.length }}
       </span>
     </div>

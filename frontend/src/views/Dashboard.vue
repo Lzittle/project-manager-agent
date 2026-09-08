@@ -26,7 +26,7 @@
             <i class="hs-div" />
             <div class="hs">
               <span class="hs-v warn">{{ stats.blocked }}</span>
-              <span class="hs-k">依赖阻塞</span>
+              <span class="hs-k">待解锁</span>
             </div>
           </div>
         </div>
@@ -107,7 +107,7 @@
           <template #header>
             <div class="panel-head">
               <span>需关注</span>
-              <span class="panel-sub">依赖未就绪的任务</span>
+              <span class="panel-sub">等前置任务完成后可继续</span>
             </div>
           </template>
           <div v-if="needs.length" class="needs">
@@ -120,7 +120,7 @@
               <el-icon class="need-go" color="var(--el-text-color-placeholder)"><ArrowRight /></el-icon>
             </div>
           </div>
-          <div v-else class="needs-empty">没有阻塞任务，一切就绪</div>
+          <div v-else class="needs-empty">没有待解锁任务，一切就绪</div>
         </el-card>
       </el-col>
     </el-row>
