@@ -111,7 +111,7 @@ const rendered = computed(() => miniMd(props.content))
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0; color: #fff; font-size: 18px;
 }
-.avatar.assistant { background: #409eff; }
+.avatar.assistant { background: #4f46e5; }
 .avatar.user { background: #67c23a; }
 .bubble {
   padding: 10px 14px;
@@ -122,7 +122,7 @@ const rendered = computed(() => miniMd(props.content))
   max-width: 100%;
 }
 .assistant .bubble { background: #fff; border: 1px solid #e4e7ed; color: #303133; }
-.user .bubble { background: #409eff; color: #fff; }
+.user .bubble { background: #4f46e5; color: #fff; }
 
 /* ---------- Agent 执行轨迹 ---------- */
 .trace { margin-top: 8px; width: 100%; border: 1px solid #e4e7ed; border-radius: 8px; overflow: hidden; background: #fafbfc; }
@@ -148,7 +148,7 @@ const rendered = computed(() => miniMd(props.content))
   display: inline-flex; align-items: center; gap: 4px;
   border: none; border-radius: 4px;
   font-size: 12px; line-height: 1; padding: 3px 7px;
-  cursor: pointer; background: #ecf5ff; color: #409eff;
+  cursor: pointer; background: #eef2ff; color: #4f46e5;
 }
 .ref-chip:hover { background: #d9ecff; }
 .ref-chip.task { background: #f0f9eb; color: #67c23a; }

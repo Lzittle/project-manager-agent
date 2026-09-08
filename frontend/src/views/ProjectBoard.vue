@@ -110,7 +110,7 @@ const tasks = ref([])
 
 const columns = [
   { status: 'todo', label: '待办', color: '#909399' },
-  { status: 'doing', label: '进行中', color: '#409eff' },
+  { status: 'doing', label: '进行中', color: '#4f46e5' },
   { status: 'done', label: '已完成', color: '#67c23a' },
 ]
 
@@ -234,7 +234,7 @@ onMounted(async () => {
   min-height: 320px;
   transition: background 0.2s;
 }
-.board-col.drop-over { background: #e1f0ff; outline: 2px dashed #409eff; }
+.board-col.drop-over { background: #e0e7ff; outline: 2px dashed #4f46e5; }
 .col-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .col-dot { width: 10px; height: 10px; border-radius: 50%; }
 .col-title { font-weight: 600; color: #303133; }
