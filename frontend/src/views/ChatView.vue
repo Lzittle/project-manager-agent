@@ -3,7 +3,12 @@
     <!-- 会话控制条 -->
     <div class="chat-bar">
       <el-select v-model="bindProject" placeholder="绑定项目（可选）" clearable style="width: 240px">
-        <el-option v-for="p in store.projects" :key="p.id" :value="p.id" :label="p.name" />
+        <el-option
+          v-for="row in store.treeRows"
+          :key="row.id"
+          :value="row.id"
+          :label="(row.depth > 1 ? '\u3000'.repeat(row.depth - 1) + '└ ' : '') + row.name"
+        />
       </el-select>
       <span class="hint">
         {{ bindProject ? '已绑定项目：Agent 会优先检索该项目知识库' : '未绑定项目：可让 Agent 创建/管理任意项目' }}

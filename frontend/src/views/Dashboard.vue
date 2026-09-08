@@ -20,14 +20,14 @@
       </el-col>
     </el-row>
 
-    <!-- 图表区：状态分布环形图 + 项目进度概览 -->
+    <!-- 图表区：状态分布环形图 + 根项目概览（按子树聚合） -->
     <el-row :gutter="16" style="margin-top: 16px">
       <el-col :xs="24" :sm="24" :md="10">
         <el-card shadow="never">
           <template #header>
             <div class="card-head">
               <span>任务状态分布</span>
-              <span class="card-sub">按任务完成阶段统计</span>
+              <span class="card-sub">全部任务（含子项目）</span>
             </div>
           </template>
           <div v-if="stats.total" ref="donutEl" class="donut" />
@@ -39,11 +39,27 @@
           <template #header>
             <div class="card-head">
               <span>项目概览</span>
-              <span class="card-sub">点击行进入看板</span>
+              <span class="card-sub">根项目行 = 含子项目的汇总；点名称行进看板，点子项目标签直达</span>
             </div>
           </template>
-          <el-table :data="projects" size="small" @row-click="goBoard">
-            <el-table-column prop="name" label="项目" min-width="130" />
+          <el-table :data="rows" size="small" @row-click="goBoard">
+            <el-table-column label="项目" min-width="170">
+              <template #default="{ row }">
+                <div class="proj-cell">
+                  <span class="proj-name">{{ row.name }}</span>
+                  <div v-if="row._kids.length" class="proj-kids">
+                    <el-tag
+                      v-for="k in row._kids"
+                      :key="k.id"
+                      size="small"
+                      effect="plain"
+                      class="proj-kid"
+                      @click.stop="goBoard(k)"
+                    >{{ k.name }}</el-tag>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column label="生命周期" width="90">
               <template #default="{ row }">
                 <el-tag size="small" :type="row.status === 'active' ? 'primary' : 'info'" effect="plain">
@@ -62,7 +78,7 @@
                       style="flex: 1"
                       :color="row.completion === 'done' ? '#22c55e' : '#4f46e5'"
                     />
-                    <span class="prog-count">{{ row.done_count ?? 0 }}/{{ row.task_count ?? 0 }}</span>
+                    <span class="prog-count">{{ row._agg.done }}/{{ row._agg.total }}</span>
                   </div>
                   <el-tag size="small" :type="completionTag(row)" class="prog-tag">{{ completionText(row) }}</el-tag>
                 </div>
@@ -70,6 +86,7 @@
             </el-table-column>
             <el-table-column prop="description" label="描述" show-overflow-tooltip />
           </el-table>
+          <el-empty v-if="!rows.length && !loading" description="暂无项目，去「项目看板」新建一个吧" :image-size="70" />
         </el-card>
       </el-col>
     </el-row>
@@ -88,29 +105,64 @@ import { useProjectStore } from '../stores/project'
 const router = useRouter()
 const store = useProjectStore()
 const loading = ref(true)
-const projects = ref([])
+// 概览行：每个根项目一行（聚合整棵子树的任务统计），子项目作为可点标签挂在父项目名下
+const rows = ref([])
 
 const stats = ref({ total: 0, todo: 0, doing: 0, done: 0 })
 
 async function loadAll() {
   loading.value = true
   try {
-    projects.value = await projectApi.list()
-    let total = 0, todo = 0, doing = 0, done = 0
-    for (const p of projects.value) {
+    const projects = await projectApi.list()
+    // 1) 每项目直接任务数
+    const byId = new Map(projects.map((p) => [p.id, p]))
+    const direct = new Map()
+    for (const p of projects) {
       const tasks = await taskApi.list(p.id)
-      const d = tasks.filter((t) => t.status === 'done').length
-      // 派生完成度：有任务且全部完成 -> done；有任务未完成 -> doing；无任务 -> none
-      p.task_count = tasks.length
-      p.done_count = d
-      p.pct = tasks.length ? Math.round((d / tasks.length) * 100) : 0
-      p.completion = !tasks.length ? 'none' : (d === tasks.length ? 'done' : 'doing')
-      for (const t of tasks) {
-        total++
-        if (t.status === 'todo') todo++
-        else if (t.status === 'doing') doing++
-        else if (t.status === 'done') done++
+      direct.set(p.id, {
+        total: tasks.length,
+        todo: tasks.filter((t) => t.status === 'todo').length,
+        doing: tasks.filter((t) => t.status === 'doing').length,
+        done: tasks.filter((t) => t.status === 'done').length,
+      })
+    }
+    // 2) 子树聚合：父项目统计 = 自身 + 全部后代
+    const childrenOf = new Map()
+    for (const p of projects) {
+      if (p.parent_id && byId.has(p.parent_id)) {
+        if (!childrenOf.has(p.parent_id)) childrenOf.set(p.parent_id, [])
+        childrenOf.get(p.parent_id).push(p)
       }
+    }
+    const memo = new Map()
+    const aggregate = (id) => {
+      if (memo.has(id)) return memo.get(id)
+      const acc = { ...(direct.get(id) || { total: 0, todo: 0, doing: 0, done: 0 }) }
+      for (const c of childrenOf.get(id) || []) {
+        const s = aggregate(c.id)
+        acc.total += s.total; acc.todo += s.todo; acc.doing += s.doing; acc.done += s.done
+      }
+      memo.set(id, acc)
+      return acc
+    }
+    // 3) 组装根项目行（孤儿项目容错视为根）
+    const roots = projects
+      .filter((p) => !p.parent_id || !byId.has(p.parent_id))
+      .sort((a, b) => b.id - a.id)
+    rows.value = roots.map((p) => {
+      const agg = aggregate(p.id)
+      return {
+        ...p,
+        _agg: agg,
+        pct: agg.total ? Math.round((agg.done / agg.total) * 100) : 0,
+        completion: !agg.total ? 'none' : (agg.done === agg.total ? 'done' : 'doing'),
+        _kids: (childrenOf.get(p.id) || []).sort((a, b) => b.id - a.id),
+      }
+    })
+    // 4) 全局统计 = 各根聚合之和（每任务恰好属于一个根的子树）
+    let total = 0, todo = 0, doing = 0, done = 0
+    for (const r of rows.value) {
+      total += r._agg.total; todo += r._agg.todo; doing += r._agg.doing; done += r._agg.done
     }
     stats.value = { total, todo, doing, done }
     await store.load()
@@ -123,11 +175,14 @@ async function loadAll() {
 }
 
 const doneProjectCount = computed(
-  () => projects.value.filter((p) => p.completion === 'done').length,
+  () => rows.value.filter((r) => r.completion === 'done').length,
+)
+const rootWithChildrenCount = computed(
+  () => rows.value.filter((r) => r._kids.length).length,
 )
 
 const cards = computed(() => [
-  { label: '项目总数', value: projects.value.length, icon: Briefcase, bg: '#4f46e5' },
+  { label: '项目总数', value: rows.value.length, icon: Briefcase, bg: '#4f46e5' },
   { label: '任务总数', value: stats.value.total, icon: Tickets, bg: '#7c3aed' },
   { label: '待办任务', value: stats.value.todo, icon: Clock, bg: '#909399' },
   { label: '进行中任务', value: stats.value.doing, icon: Loading, bg: '#e6a23c' },
@@ -203,7 +258,7 @@ onUnmounted(() => {
   donutChart = null
 })
 
-// 完成度标签：已归档 > 已完成 > 进行中/未开始（生命周期与完成度分开表达）
+// 完成度标签：已归档 > 已完成 > 进行中/未开始
 const completionText = (row) => {
   if (row.status === 'archived') return '已归档'
   if (row.completion === 'done') return '已完成'
@@ -215,8 +270,9 @@ const completionTag = (row) => {
   return row.completion === 'none' ? 'info' : 'primary'
 }
 
-function goBoard(row) {
-  store.setCurrent(row.id)
+// 跳转：行（根项目）或子项目标签 → 打开对应项目看板
+function goBoard(project) {
+  store.setCurrent(project.id)
   router.push('/board')
 }
 </script>
@@ -240,6 +296,11 @@ function goBoard(row) {
 }
 .stat-num { font-size: 26px; font-weight: 700; color: #1f2329; line-height: 1.2; }
 .stat-label { color: #909399; font-size: 13px; }
+.proj-cell { display: flex; flex-direction: column; gap: 6px; }
+.proj-name { font-weight: 600; color: #303133; }
+.proj-kids { display: flex; flex-wrap: wrap; gap: 4px; }
+.proj-kid { cursor: pointer; }
+.proj-kid:hover { color: var(--el-color-primary); }
 .prog-cell { display: flex; flex-direction: column; gap: 4px; }
 .prog-row { display: flex; align-items: center; gap: 8px; }
 .prog-count { font-size: 12px; color: #909399; white-space: nowrap; }

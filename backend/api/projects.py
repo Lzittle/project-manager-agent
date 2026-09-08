@@ -26,7 +26,12 @@ def create_project(
     user_id: int = Query(..., description="当前用户 id"),
     db: Session = Depends(get_db),
 ):
-    return project_service.create_project(db, user_id, body.name, body.description)
+    """创建项目；body.parent_id 非空 → 在该项目下创建子项目（层级树）。"""
+    try:
+        return project_service.create_project(
+            db, user_id, body.name, body.description, parent_id=body.parent_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @router.get("/{project_id}/dependencies")

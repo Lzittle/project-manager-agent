@@ -2,7 +2,12 @@
   <div>
     <div class="toolbar">
       <el-select v-model="store.currentId" placeholder="选择项目" style="width: 260px" @change="loadDocs">
-        <el-option v-for="p in store.projects" :key="p.id" :value="p.id" :label="p.name" />
+        <el-option
+          v-for="row in store.treeRows"
+          :key="row.id"
+          :value="row.id"
+          :label="(row.depth > 1 ? '\u3000'.repeat(row.depth - 1) + '└ ' : '') + row.name"
+        />
       </el-select>
       <el-upload
         drag

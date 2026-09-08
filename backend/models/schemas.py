@@ -32,12 +32,14 @@ class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = ""
     status: ProjectStatus = "active"
+    parent_id: Optional[int] = None  # 父项目 id：非空表示创建子项目/小项目
 
 
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     status: Optional[ProjectStatus] = None
+    parent_id: Optional[int] = None  # None 表示不动；要置空父级需要单独字段语义（当前不支持改挂靠）
 
 
 class ProjectOut(BaseModel):
@@ -48,6 +50,7 @@ class ProjectOut(BaseModel):
     description: Optional[str] = ""
     status: str
     creator_id: int
+    parent_id: Optional[int] = None  # 子项目层级：根项目为空
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

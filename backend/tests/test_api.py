@@ -54,6 +54,69 @@ def test_project_crud(client):
     assert client.get(f"/api/projects/{pid}").status_code == 404
 
 
+# ---------- 项目层级（子项目/小项目） ----------
+
+def _new_subproject(client, parent_id, name):
+    r = client.post("/api/projects?user_id=1",
+                    json={"name": name, "description": "子项目", "parent_id": parent_id})
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_project_hierarchy_create_and_list(client):
+    """parent_id 自关联：子项目 → 孙项目可逐级创建，列表带 parent_id。"""
+    root = _new_project(client, "层级根项目")
+    child = _new_subproject(client, root["id"], "子项目A")
+    assert child["parent_id"] == root["id"]
+    grand = _new_subproject(client, child["id"], "孙项目B")
+    assert grand["parent_id"] == child["id"]
+
+    by_id = {x["id"]: x for x in client.get("/api/projects?user_id=1").json()}
+    assert by_id[root["id"]]["parent_id"] is None
+    assert by_id[child["id"]]["parent_id"] == root["id"]
+    assert by_id[grand["id"]]["parent_id"] == child["id"]
+
+
+def test_project_hierarchy_guards(client):
+    """跨用户挂靠 / 归档父项目 / 父项目不存在 → 400 拦截。"""
+    root = _new_project(client, "防护根项目")
+    # 跨用户：user_id=2 不能挂在 user 1 的项目下
+    r = client.post("/api/projects?user_id=2",
+                    json={"name": "别人的子项目", "parent_id": root["id"]})
+    assert r.status_code == 400
+    # 父项目已归档 → 拒绝挂子项目
+    assert client.patch(f"/api/projects/{root['id']}",
+                        json={"status": "archived"}).status_code == 200
+    r2 = client.post("/api/projects?user_id=1",
+                     json={"name": "挂到归档项目", "parent_id": root["id"]})
+    assert r2.status_code == 400
+    # 父项目不存在
+    r3 = client.post("/api/projects?user_id=1",
+                     json={"name": "悬空子项目", "parent_id": 999999})
+    assert r3.status_code == 400
+
+
+def test_project_hierarchy_depth_limit(client):
+    """层级上限 3 级：四层挂靠被拒。"""
+    root = _new_project(client, "深度根项目")
+    child = _new_subproject(client, root["id"], "二层项目")
+    grand = _new_subproject(client, child["id"], "三层项目")
+    r = client.post("/api/projects?user_id=1",
+                    json={"name": "四层项目", "parent_id": grand["id"]})
+    assert r.status_code == 400
+    assert "层级" in r.json()["detail"]
+
+
+def test_project_delete_cascades_subtree(client):
+    """删除父项目 → 整棵子树（子项目及其任务）级联删除。"""
+    root = _new_project(client, "级联根项目")
+    child = _new_subproject(client, root["id"], "级联子项目")
+    task = _new_task(client, child["id"], "子项目任务")
+    assert client.delete(f"/api/projects/{root['id']}").status_code == 200
+    assert client.get(f"/api/projects/{child['id']}").status_code == 404
+    assert client.get(f"/api/tasks/{task['id']}").status_code == 404
+
+
 # ---------- 任务 CRUD + 状态流转 + 评论 ----------
 
 def test_task_crud_and_status_flow(client):

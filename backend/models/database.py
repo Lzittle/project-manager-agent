@@ -52,6 +52,8 @@ def _run_light_migrations(engine) -> None:
         _ensure_column(conn, "chat_messages", "trace", "TEXT", "chat_messages 新增 trace 列（Agent 执行轨迹 meta JSON）")
         _ensure_column(conn, "knowledge_documents", "doc_type", "VARCHAR(20)",
                        "knowledge_documents 新增 doc_type 列（doc=文档 / meeting=会议纪要）")
+        _ensure_column(conn, "projects", "parent_id", "INTEGER",
+                       "projects 新增 parent_id 列（子项目层级，根项目为空）")
 
 
 def _ensure_column(conn, table: str, column: str, ddl_type: str, log_msg: str) -> None:
@@ -97,7 +99,7 @@ class ChatMessage(Base):
 
 
 class Project(Base):
-    """项目表"""
+    """项目表（parent_id 自关联：项目下可再拆「子项目/小项目」，形成层级树）"""
     __tablename__ = "projects"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -105,12 +107,16 @@ class Project(Base):
     description = Column(Text, default="")
     status = Column(String(20), nullable=False, default="active", index=True)  # active / archived
     creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    parent_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)  # 父项目（根项目为空）
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     creator = relationship("User", back_populates="projects")
     tasks = relationship("Task", back_populates="project")
     documents = relationship("KnowledgeDocument", back_populates="project")
+    # 层级：parent_id -> 父项目；children -> 直接子项目（删除用显式级联，见 project_service）
+    parent = relationship("Project", remote_side=[id], back_populates="children")
+    children = relationship("Project", back_populates="parent")
 
 
 class Task(Base):

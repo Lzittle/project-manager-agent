@@ -1,20 +1,45 @@
 <template>
   <div>
+    <!-- 层级面包屑：根项目 → … → 当前项目（子项目可逐级进入） -->
+    <div v-if="ancestors.length || store.current" class="crumb-bar">
+      <el-breadcrumb separator="/">
+        <el-breadcrumb-item
+          v-for="a in ancestors"
+          :key="a.id"
+        >
+          <a class="crumb-link" @click.prevent="jumpTo(a.id)">{{ a.name }}</a>
+        </el-breadcrumb-item>
+        <el-breadcrumb-item v-if="store.current">
+          <span class="crumb-now">{{ store.current.name }}</span>
+        </el-breadcrumb-item>
+      </el-breadcrumb>
+      <el-tag v-if="store.currentDepth > 1" size="small" type="warning" effect="light" round>
+        子项目 · 第 {{ store.currentDepth }} 级
+      </el-tag>
+    </div>
+
     <!-- 顶部操作区 -->
     <div class="toolbar">
       <el-select
         v-model="store.currentId"
         placeholder="选择项目"
-        style="width: 260px"
+        style="width: 280px"
         @change="loadTasks"
       >
-        <el-option v-for="p in store.projects" :key="p.id" :value="p.id" :label="p.name" />
+        <el-option v-for="row in store.treeRows" :key="row.id" :value="row.id">
+          <span :class="{ 'opt-child': row.depth > 1 }">{{ indentOf(row) }}{{ row.name }}</span>
+        </el-option>
       </el-select>
 
       <el-button type="primary" :icon="Plus" @click="openCreateTask" :disabled="!store.current">
         新建任务
       </el-button>
-      <el-button :icon="FolderAdd" @click="openCreateProject">新建项目</el-button>
+      <el-tooltip content="在当前项目下创建子项目/小项目" placement="top">
+        <el-button :icon="FolderAdd" @click="openCreateSubproject" :disabled="!store.current">
+          建子项目
+        </el-button>
+      </el-tooltip>
+      <el-button :icon="FolderOpened" @click="openCreateProject">新建项目</el-button>
       <span v-if="store.current" class="proj-desc">{{ store.current.description }}</span>
     </div>
 
@@ -69,16 +94,23 @@
       </template>
     </el-dialog>
 
-    <!-- 新建项目 dialog -->
-    <el-dialog v-model="projDlg.visible" title="新建项目" width="460px">
+    <!-- 新建项目 dialog（parentId 非空 = 建当前项目下的子项目） -->
+    <el-dialog v-model="projDlg.visible"
+               :title="projDlg.parentId ? '新建子项目（挂到当前项目下）' : '新建项目'" width="460px">
       <el-form label-width="70px">
+        <el-form-item v-if="projDlg.parentId" label="父项目">
+          <el-input :model-value="store.current?.name" disabled />
+        </el-form-item>
         <el-form-item label="项目名称" required>
-          <el-input v-model="projDlg.name" placeholder="例如：电商系统" />
+          <el-input v-model="projDlg.name" :placeholder="projDlg.parentId ? '例如：登录模块（小项目）' : '例如：电商系统'" />
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="projDlg.description" type="textarea" :rows="2" />
         </el-form-item>
-        <el-form-item label="AI 规划">
+        <el-form-item v-if="projDlg.parentId" label="说明">
+          <div class="dlg-tip">子项目是父项目下的独立小项目：有自己的任务看板与知识库，删除父项目时整棵子树一并清理。</div>
+        </el-form-item>
+        <el-form-item v-if="!projDlg.parentId" label="AI 规划">
           <el-switch
             v-model="projDlg.autoPlan"
             active-text="创建后由 AI 自动规划任务（推荐）"
@@ -96,9 +128,9 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, FolderAdd } from '@element-plus/icons-vue'
+import { Plus, FolderAdd, FolderOpened } from '@element-plus/icons-vue'
 import { taskApi, projectApi } from '../api'
 import { useProjectStore } from '../stores/project'
 import TaskCard from '../components/TaskCard.vue'
@@ -115,9 +147,33 @@ const columns = [
 ]
 
 const taskDlg = reactive({ visible: false, title: '', description: '', priority: 'medium', submitting: false })
-const projDlg = reactive({ visible: false, name: '', description: '', autoPlan: true, submitting: false })
+const projDlg = reactive({ visible: false, parentId: null, name: '', description: '', autoPlan: true, submitting: false })
 
 const tasksBy = (status) => tasks.value.filter((t) => t.status === status)
+
+// ---------- 层级辅助 ----------
+// 树形下拉的缩进标签（子项目前加“└”并缩进）
+const indentOf = (row) => (row.depth > 1 ? '\u3000'.repeat(row.depth - 1) + '└ ' : '')
+
+// 当前项目的祖先链（根在前），面包屑用
+const ancestors = computed(() => {
+  const chain = []
+  const seen = new Set()
+  let cur = store.current
+  while (cur && cur.parent_id && !seen.has(cur.id)) {
+    seen.add(cur.id)
+    const parent = store.projects.find((p) => p.id === cur.parent_id)
+    if (!parent) break
+    chain.unshift(parent)
+    cur = parent
+  }
+  return chain
+})
+
+function jumpTo(projectId) {
+  store.setCurrent(projectId)
+  loadTasks()
+}
 
 async function loadTasks() {
   if (!store.currentId) { tasks.value = []; return }
@@ -184,20 +240,34 @@ async function submitTask() {
 
 function openCreateProject() {
   projDlg.visible = true
+  projDlg.parentId = null
   projDlg.name = ''
   projDlg.description = ''
   projDlg.autoPlan = true
 }
+
+function openCreateSubproject() {
+  if (!store.current) return
+  projDlg.visible = true
+  projDlg.parentId = store.currentId
+  projDlg.name = ''
+  projDlg.description = ''
+  projDlg.autoPlan = false // 子项目默认不自动规划，任务由用户/父项目阶段拆分
+}
+
 async function submitProject() {
   if (!projDlg.name.trim()) return ElMessage.warning('请输入项目名称')
   projDlg.submitting = true
   try {
-    const list = (await store.create(projDlg.name.trim(), projDlg.description)) || []
-    const created = list.find((p) => p.name === projDlg.name.trim())
-    const pid = created?.id ?? list[0]?.id ?? store.currentId
+    const parentId = projDlg.parentId
+    const list = (await store.create(projDlg.name.trim(), projDlg.description, parentId)) || []
+    const name = projDlg.name.trim()
+    // 优先按「同名 + 挂在同一父级下」定位刚建的项目（避免同名项目撞车取错）
+    const created = list.find((p) => p.name === name && (p.parent_id ?? null) === parentId)
+    const pid = created?.id ?? list.find((p) => p.name === name)?.id ?? list[0]?.id ?? store.currentId
     store.setCurrent(pid)
-    // 勾选「一键规划」：创建后立刻让 Agent 按项目主题自动生成任务（复用对话内同一条规划逻辑）
-    if (projDlg.autoPlan && pid != null) {
+    // 顶层项目勾选「一键规划」：创建后立刻让 AI 按主题生成任务；子项目不自动规划
+    if (!parentId && projDlg.autoPlan && pid != null) {
       loading.value = true
       try {
         const res = await projectApi.plan(pid)
@@ -208,6 +278,8 @@ async function submitProject() {
       } finally {
         loading.value = false
       }
+    } else if (parentId) {
+      ElMessage.success(`子项目已创建，挂到「${store.current?.name ?? ''}」下`)
     } else {
       ElMessage.success('项目已创建')
     }
@@ -224,6 +296,19 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.crumb-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+}
+.crumb-link { color: var(--el-color-primary); cursor: pointer; font-weight: 500; }
+.crumb-now { color: #303133; font-weight: 600; }
+.opt-child { color: #606266; font-size: 13px; }
 .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
 .proj-desc { color: #909399; font-size: 13px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }
