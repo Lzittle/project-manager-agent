@@ -1,0 +1,30 @@
+/* Squad · 小队智脑 —— 品牌主题
+ * 覆盖 Element Plus 主色为品牌靛蓝（indigo），整体偏「AI 协管 / 团队协作」气质。
+ * 内容区保持亮色，品牌感由侧边栏深色 + 主色统一传达。
+ */
+:root {
+  /* 品牌主色：indigo */
+  --el-color-primary: #4f46e5;
+  --el-color-primary-dark-2: #4338ca;
+  --el-color-primary-light-3: #7c74ee;
+  --el-color-primary-light-5: #a5a0f4;
+  --el-color-primary-light-7: #c9c6f9;
+  --el-color-primary-light-8: #dcdafb;
+  --el-color-primary-light-9: #efeffd;
+
+  /* 品牌扩展色（自定义变量） */
+  --squad-brand: #4f46e5;
+  --squad-brand-deep: #312e81;
+  --squad-brand-grad: linear-gradient(135deg, #6366f1 0%, #4f46e5 55%, #312e81 100%);
+  --squad-sidebar-bg: #17142e;        /* 深色侧边栏底 */
+  --squad-sidebar-bg-2: #221d43;
+  --squad-sidebar-text: rgba(255, 255, 255, 0.72);
+  --squad-sidebar-text-active: #ffffff;
+  --squad-radius: 10px;
+}
+
+/* 细滚动条（内容区更精致） */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.18); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.3); }
+::-webkit-scrollbar-track { background: transparent; }

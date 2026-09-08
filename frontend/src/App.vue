@@ -2,13 +2,18 @@
   <el-container class="layout">
     <Sidebar />
 
-    <el-container>
+    <el-container class="right">
       <el-header class="header">
-        <div class="header-title">{{ $route.meta.title || '项目管理' }}</div>
-        <el-tag type="success" effect="light" round>
-          <el-icon style="vertical-align: -2px; margin-right: 4px"><User /></el-icon>
-          alice (演示用户)
-        </el-tag>
+        <div class="header-title">
+          {{ $route.meta.title || 'Squad' }}
+          <span v-if="$route.meta.title" class="header-crumb">/ Squad · 小队智脑</span>
+        </div>
+        <div class="header-right">
+          <el-tag type="primary" effect="plain" round>
+            <el-icon style="vertical-align: -2px; margin-right: 4px"><User /></el-icon>
+            alice (演示用户)
+          </el-tag>
+        </div>
       </el-header>
       <el-main class="main">
         <router-view />
@@ -30,11 +35,20 @@ body { font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Microsoft YaHei
 .layout { height: 100%; }
 .header {
   background: #fff;
-  border-bottom: 1px solid var(--el-border-color-light);
+  border-bottom: 1px solid var(--el-border-color-lighter);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  height: 56px !important;
+  padding: 0 20px;
 }
-.header-title { font-size: 18px; font-weight: 600; }
-.main { background: #f5f7fa; }
+.header-title { font-size: 17px; font-weight: 700; color: #1f2329; }
+.header-crumb { font-size: 12px; font-weight: 400; color: #a8abb2; margin-left: 8px; }
+.main {
+  background: #f4f5f9;
+  padding: 18px 20px;
+  overflow-y: auto;
+}
+/* 页面卡片统一呼吸感 */
+.el-card { border-radius: var(--squad-radius); }
 </style>

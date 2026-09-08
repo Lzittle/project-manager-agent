@@ -495,6 +495,29 @@ def test_dependency_add_and_list(client):
     assert deps == [{"task_id": ta["id"], "depends_on_id": tb["id"]}]
 
 
+def test_task_blocked_by_count(client):
+    """列表/详情带 blocked_by_count：有未完成前置 → 被阻塞计数；前置完成 → 归零。"""
+    p = _new_project(client, "阻塞角标项目")
+    ta = _new_task(client, p["id"], "任务A")
+    tb = _new_task(client, p["id"], "任务B")
+    assert _link(client, ta["id"], tb["id"]).status_code == 201
+
+    # 列表：A 依赖未完成的 B → blocked_by_count=1；B 无前置 → 0
+    by_id = {t["id"]: t for t in client.get(f"/api/tasks?project_id={p['id']}").json()}
+    assert by_id[ta["id"]]["depends_on"] == [tb["id"]]
+    assert by_id[ta["id"]]["blocked_by_count"] == 1
+    assert by_id[tb["id"]]["blocked_by_count"] == 0
+
+    # 详情接口同样带阻塞计数
+    detail = client.get(f"/api/tasks/{ta['id']}").json()
+    assert detail["blocked_by_count"] == 1
+
+    # B 完成后 A 解除阻塞
+    assert client.patch(f"/api/tasks/{tb['id']}", json={"status": "done"}).status_code == 200
+    by_id2 = {t["id"]: t for t in client.get(f"/api/tasks?project_id={p['id']}").json()}
+    assert by_id2[ta["id"]]["blocked_by_count"] == 0
+
+
 def test_dependency_reject_self_and_cross_project(client):
     """自依赖、跨项目依赖、重复依赖都被拒。"""
     pa = _new_project(client, "依赖项目A")

@@ -5,15 +5,18 @@
 from datetime import date
 from typing import Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from models.database import Project, Task, TaskComment, TaskDependency
 
 
 # ---------- 任务 ----------
 def list_tasks(db: Session, project_id: int) -> list[Task]:
+    """项目下全部任务。selectinload 预加载依赖关系，避免列表接口 N+1 查询，
+    同时让接口层能批量计算「被 N 个未完成前置阻塞」角标。"""
     return (db.query(Task)
             .filter_by(project_id=project_id)
+            .options(selectinload(Task.dependencies))
             .order_by(Task.id.desc())
             .all())
 

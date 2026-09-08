@@ -2,29 +2,53 @@
 
 列表/创建通过 ?project_id= 定位项目；user_id 用于记录创建人/评论人。
 """
-
-def _with_deps(task) -> dict:
-    """给 Task ORM 补 depends_on 摘要（前置任务 id 列表）后转 dict，
-    使列表/详情接口都能直接看到依赖关系，前端无需二次请求。"""
-    d = {c.name: getattr(task, c.name) for c in task.__table__.columns}
-    d["depends_on"] = [dep.depends_on_id for dep in task.dependencies]
-    return d
-
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from models.database import get_db
+from models.database import get_db, Task
 from models.schemas import TaskCreate, TaskUpdate, TaskOut, CommentCreate, CommentOut, DependencyCreate
 from services import task_service
 
 router = APIRouter()
 
 
+def _base_dict(task) -> dict:
+    """任务 ORM → dict + depends_on 摘要（前置任务 id 列表）。"""
+    d = {c.name: getattr(task, c.name) for c in task.__table__.columns}
+    d["depends_on"] = [dep.depends_on_id for dep in task.dependencies]
+    return d
+
+
+def _with_deps(db: Session, task) -> dict:
+    """单任务：依赖摘要 + 阻塞计数（逐条查前置任务状态）。"""
+    d = _base_dict(task)
+    blocked = 0
+    for dep in task.dependencies:
+        pre = db.get(Task, dep.depends_on_id)
+        if pre is None or pre.status != "done":
+            blocked += 1
+    d["blocked_by_count"] = blocked
+    return d
+
+
+def _list_with_deps(tasks) -> list[dict]:
+    """列表：本项目任务状态一次成表，批量计算阻塞计数，避免每条任务逐次回库。
+
+    前置任务必然同项目（跨项目依赖在创建层被拦截），未命中视为未完成保守计数。
+    """
+    status = {t.id: t.status for t in tasks}
+    return [
+        {**_base_dict(t),
+         "blocked_by_count": sum(
+             1 for dep in t.dependencies if status.get(dep.depends_on_id) != "done")}
+        for t in tasks
+    ]
+
+
 @router.get("", response_model=list[TaskOut])
 def list_tasks(project_id: int = Query(..., description="项目 id"), db: Session = Depends(get_db)):
     tasks = task_service.list_tasks(db, project_id)
-    return [_with_deps(t) for t in tasks]
+    return _list_with_deps(tasks)
 
 
 @router.post("", response_model=TaskOut, status_code=201)
@@ -40,7 +64,7 @@ def create_task(
     )
     if t is None:
         raise HTTPException(404, f"项目 {body.project_id} 不存在")
-    return _with_deps(t)
+    return _with_deps(db, t)
 
 
 @router.get("/{task_id}", response_model=TaskOut)
@@ -48,7 +72,7 @@ def get_task(task_id: int, db: Session = Depends(get_db)):
     t = task_service.get_task(db, task_id)
     if t is None:
         raise HTTPException(404, f"任务 {task_id} 不存在")
-    return _with_deps(t)
+    return _with_deps(db, t)
 
 
 @router.patch("/{task_id}", response_model=TaskOut)
@@ -60,7 +84,7 @@ def update_task(task_id: int, body: TaskUpdate, db: Session = Depends(get_db)):
     )
     if t is None:
         raise HTTPException(404, f"任务 {task_id} 不存在")
-    return _with_deps(t)
+    return _with_deps(db, t)
 
 
 @router.delete("/{task_id}")

@@ -91,6 +91,8 @@ class TaskOut(BaseModel):
     updated_at: Optional[datetime] = None
     # 依赖摘要（由接口层填充，非 ORM 列）：本任务的前置任务 id 列表
     depends_on: Optional[list[int]] = None
+    # 阻塞角标：尚未完成的前置任务数（>0 表示本任务被依赖阻塞，无法开工）
+    blocked_by_count: Optional[int] = 0
 
 
 # ---------- 任务依赖 ----------
