@@ -1,9 +1,15 @@
-/* Squad · 小队智脑 —— 品牌主题
- * 覆盖 Element Plus 主色为品牌靛蓝（indigo），整体偏「AI 协管 / 团队协作」气质。
- * 内容区保持亮色，品牌感由侧边栏深色 + 主色统一传达。
- */
+/* ==========================================================================
+ * Squad · 小队智脑 —— 设计系统 v2（Linear 化：克制、精确、单一强调色）
+ * 风格锚点: web-design-engineer / style-recipes/linear.md（浅色演绎版）
+ * 原则:
+ *   - 单一强调色（靛蓝 #4f46e5 ≈ Linear purple 的品牌本地版），其余皆中性灰
+ *   - 发丝 1px 分隔线代替大阴影；卡片阴影"barely there"
+ *   - 圆角克制: 控件 6 / 卡片 12，永不 gummy
+ *   - 动效 150ms ease-out，snappy 不弹跳
+ * 实现: 覆盖 Element Plus CSS 变量 => 全站组件立即生效，无需逐个改 EP 组件
+ * ========================================================================== */
 :root {
-  /* 品牌主色：indigo */
+  /* ---------- 品牌主色（唯一强调色） ---------- */
   --el-color-primary: #4f46e5;
   --el-color-primary-dark-2: #4338ca;
   --el-color-primary-light-3: #7c74ee;
@@ -12,19 +18,143 @@
   --el-color-primary-light-8: #dcdafb;
   --el-color-primary-light-9: #efeffd;
 
-  /* 品牌扩展色（自定义变量） */
   --squad-brand: #4f46e5;
   --squad-brand-deep: #312e81;
   --squad-brand-grad: linear-gradient(135deg, #6366f1 0%, #4f46e5 55%, #312e81 100%);
-  --squad-sidebar-bg: #17142e;        /* 深色侧边栏底 */
-  --squad-sidebar-bg-2: #221d43;
-  --squad-sidebar-text: rgba(255, 255, 255, 0.72);
+  --squad-sidebar-bg: #14121f;      /* 深色侧栏：warm near-black，Linear 底色口吻 */
+  --squad-sidebar-bg-2: #1e1b2e;
+  --squad-sidebar-text: rgba(255, 255, 255, 0.66);
   --squad-sidebar-text-active: #ffffff;
-  --squad-radius: 10px;
+  --squad-sidebar-hairline: rgba(255, 255, 255, 0.06);
+
+  /* ---------- 状态色：收敛为语义四色（success 统一为单一绿色系） ---------- */
+  --el-color-success: #22c55e;
+  --el-color-success-dark-2: #16a34a;
+  --el-color-success-light-3: #4ade80;
+  --el-color-success-light-5: #86efac;
+  --el-color-success-light-7: #bbf7d0;
+  --el-color-success-light-8: #d1fae5;
+  --el-color-success-light-9: #ecfdf5;
+
+  --el-color-warning: #e6a23c;
+  --el-color-warning-dark-2: #b88230;
+  --el-color-warning-light-3: #eebe77;
+  --el-color-warning-light-5: #f3d19e;
+  --el-color-warning-light-7: #f8e3c5;
+  --el-color-warning-light-8: #faecd8;
+  --el-color-warning-light-9: #fdf6ec;
+
+  --el-color-danger: #ef4444;
+  --el-color-danger-dark-2: #dc2626;
+  --el-color-danger-light-3: #f87171;
+  --el-color-danger-light-5: #fca5a5;
+  --el-color-danger-light-7: #fecaca;
+  --el-color-danger-light-8: #fee2e2;
+  --el-color-danger-light-9: #fef2f2;
+
+  --el-color-error: #ef4444;
+  --el-color-error-dark-2: #dc2626;
+  --el-color-error-light-3: #f87171;
+  --el-color-error-light-5: #fca5a5;
+  --el-color-error-light-7: #fecaca;
+  --el-color-error-light-8: #fee2e2;
+  --el-color-error-light-9: #fef2f2;
+
+  --el-color-info: #6b7280;
+  --el-color-info-dark-2: #4b5563;
+  --el-color-info-light-3: #9ca3af;
+  --el-color-info-light-5: #c8cdd5;
+  --el-color-info-light-7: #e2e5ea;
+  --el-color-info-light-8: #eceef2;
+  --el-color-info-light-9: #f6f7f9;
+
+  /* ---------- 中性层：灰阶单一来源（组件全部改走这些 var） ---------- */
+  --el-text-color-primary: #1f2329;
+  --el-text-color-regular: #4b5563;
+  --el-text-color-secondary: #6b7280;
+  --el-text-color-placeholder: #9ca3af;
+  --el-text-color-disabled: #c8cdd5;
+
+  --el-border-color: #dcdfe6;          /* 主分隔线 */
+  --el-border-color-light: #e5e7eb;    /* 发丝分隔（最常用） */
+  --el-border-color-lighter: #eceef1;
+  --el-border-color-extra-light: #f3f4f6;
+  --el-border-color-dark: #c8cdd5;
+  --el-border-color-darker: #a8adb8;
+
+  --el-fill-color: #f3f4f6;
+  --el-fill-color-light: #f6f7f8;
+  --el-fill-color-lighter: #fafbfc;
+  --el-fill-color-extra-light: #fcfcfd;
+  --el-fill-color-dark: #e8eaed;
+  --el-fill-color-darker: #dcdfe3;
+
+  --el-bg-color: #ffffff;
+  --el-bg-color-page: #f7f8fa;         /* 内容区底：比纯白低一档，衬托白色卡片 */
+  --el-bg-color-overlay: #ffffff;
+
+  /* ---------- 圆角：控件 6 / 卡片 12（永不超过 16） ---------- */
+  --el-border-radius-small: 4px;
+  --el-border-radius-base: 6px;        /* 按钮/输入/下拉等控件 */
+  --el-border-radius-round: 999px;
+  --squad-radius-card: 12px;
+  --squad-radius-control: 6px;
+
+  /* ---------- 阴影：barely there（拒绝彩色/大阴影） ---------- */
+  --el-box-shadow: 0 2px 10px rgba(17, 24, 39, 0.06);
+  --el-box-shadow-light: 0 1px 3px rgba(17, 24, 39, 0.05);
+  --el-box-shadow-lighter: 0 1px 2px rgba(17, 24, 39, 0.03);
+  --el-box-shadow-dark: 0 4px 16px rgba(17, 24, 39, 0.12);
+  --squad-shadow-hover: 0 2px 6px rgba(17, 24, 39, 0.07), 0 0 0 1px rgba(79, 70, 229, 0.06);
+
+  /* ---------- 动效：150ms ease-out，snappy 不弹跳 ---------- */
+  --el-transition-duration: 0.2s;
+  --el-transition-duration-fast: 0.12s;
+  --squad-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* ---------- 字阶（本项目自有类统一引用） ---------- */
+  --squad-fs-caption: 12px;
+  --squad-fs-body: 14px;
+  --squad-fs-title: 15px;
+  --squad-fs-h3: 16px;
+  --squad-fs-h2: 20px;
+  --squad-fs-display: 26px;
 }
 
-/* 细滚动条（内容区更精致） */
+/* ---------- 全局动效基调 ---------- */
+* { transition-timing-function: var(--squad-ease); }
+
+/* ---------- 弹层/卡片归一：发丝线 + 白底 + 克制圆角 ---------- */
+.el-card {
+  border-radius: var(--squad-radius-card);
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: none !important;                 /* 分隔靠 hairline，不靠阴影 */
+  transition: box-shadow 0.15s var(--squad-ease), transform 0.15s var(--squad-ease);
+}
+.el-card.is-hover-shadow:hover {
+  box-shadow: var(--squad-shadow-hover) !important;
+}
+
+/* 弹层（下拉/弹窗）柔化 */
+.el-popper, .el-dialog {
+  box-shadow: var(--el-box-shadow-light);
+}
+.el-dialog {
+  border-radius: var(--squad-radius-card);
+  border: 1px solid var(--el-border-color-light);
+}
+
+/* ---------- 表单控件 hover/focus 反馈（snappy） ---------- */
+.el-input__wrapper, .el-textarea__inner {
+  transition: box-shadow 0.15s var(--squad-ease), border-color 0.15s var(--squad-ease);
+}
+.el-button {
+  font-weight: 500;
+  transition: all 0.15s var(--squad-ease);
+}
+
+/* ---------- 细滚动条 ---------- */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.18); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.3); }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.16); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.28); }
 ::-webkit-scrollbar-track { background: transparent; }

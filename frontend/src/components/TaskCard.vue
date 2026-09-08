@@ -19,7 +19,9 @@
     <div v-if="task.description" class="tc-desc">{{ task.description }}</div>
     <div class="tc-foot">
       <div class="tc-meta">
-        <el-tag size="small" :type="statusType" effect="light" round>{{ statusText }}</el-tag>
+        <span class="tc-status" :class="'st-' + task.status">
+          <i class="tc-dot" />{{ statusText }}
+        </span>
         <span v-if="task.assignee_name" class="tc-assignee">
           <el-icon><User /></el-icon>{{ task.assignee_name }}
         </span>
@@ -45,11 +47,9 @@ const PRIORITY = {
   medium: { text: '中', cls: 'medium' },
   low: { text: '低', cls: 'low' },
 }
-const STATUS_TYPE = { todo: 'info', doing: 'primary', done: 'success' }
 const STATUS_TEXT = { todo: '待办', doing: '进行中', done: '已完成' }
 
 const priText = computed(() => PRIORITY[props.task.priority]?.text || props.task.priority)
-const statusType = computed(() => STATUS_TYPE[props.task.status] || 'info')
 const statusText = computed(() => STATUS_TEXT[props.task.status] || props.task.status)
 // 有未完成前置 → 阻塞（仅对未完成任务显示，已完成不视为阻塞）
 const isBlocked = computed(() =>
@@ -64,61 +64,84 @@ function onDragStart(e) {
 </script>
 
 <style scoped>
+/* Linear 式任务卡：发丝边框 + 极柔阴影，状态用「点」而非彩色大标签 */
 .task-card {
-  background: #fff;
-  border-radius: 10px;
-  padding: 10px 12px;
+  background: var(--el-bg-color);
+  border-radius: var(--squad-radius-card);
+  padding: 12px 14px;
   margin-bottom: 10px;
-  box-shadow: 0 1px 3px rgba(31, 35, 41, 0.08);
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: var(--el-box-shadow-lighter);
   cursor: grab;
-  border: 1px solid transparent;
-  border-left: 3px solid var(--el-color-primary-light-7);
-  transition: box-shadow 0.2s, border-color 0.2s, transform 0.1s;
+  transition: box-shadow 0.15s var(--squad-ease), border-color 0.15s var(--squad-ease),
+              transform 0.15s var(--squad-ease);
 }
 .task-card:hover {
-  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.12);
-  border-color: var(--el-color-primary-light-5);
+  box-shadow: var(--squad-shadow-hover);
+  border-color: var(--el-color-primary-light-7);
   transform: translateY(-1px);
 }
 .task-card.blocked {
-  border-left-color: #e6a23c;
-  background: linear-gradient(135deg, #fffdf7 0%, #fff 60%);
+  border-color: var(--el-color-warning-light-5);
+  background: var(--el-color-warning-light-9);
 }
 .task-card:active { cursor: grabbing; }
 .tc-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+
+/* 优先级：克制的小描边 pill（不再实心色块） */
 .tc-pri {
   font-size: 11px;
-  padding: 1px 8px;
-  border-radius: 10px;
-  color: #fff;
+  line-height: 16px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
 }
-.tc-pri.high { background: #f56c6c; }
-.tc-pri.medium { background: #e6a23c; }
-.tc-pri.low { background: #909399; }
+.tc-pri.high { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
+.tc-pri.medium { color: #b88230; border-color: #f3d19e; background: #fdf6ec; }
+.tc-pri.low { color: var(--el-text-color-secondary); border-color: var(--el-border-color); background: var(--el-fill-color-lighter); }
+
+/* 依赖 / 阻塞徽记 */
 .tc-blocked {
   font-size: 11px;
-  color: #e6a23c;
-  background: #fdf6ec;
-  padding: 1px 8px;
-  border-radius: 10px;
+  color: var(--el-color-warning);
+  background: var(--el-color-warning-light-9);
+  padding: 0 8px;
+  line-height: 16px;
+  border-radius: 999px;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
 }
 .tc-dep {
   font-size: 11px;
   color: var(--el-color-primary);
   background: var(--el-color-primary-light-9);
-  padding: 1px 8px;
-  border-radius: 10px;
+  padding: 0 8px;
+  line-height: 16px;
+  border-radius: 999px;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
 }
-.tc-title { font-size: 14px; font-weight: 600; color: #1f2329; margin-bottom: 4px; }
+
+/* 状态：单色点 + 文字（克制，Linear 口吻） */
+.tc-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+}
+.tc-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.st-todo .tc-dot { background: var(--el-text-color-placeholder); }
+.st-doing .tc-dot { background: var(--el-color-primary); }
+.st-done .tc-dot { background: var(--el-color-success); }
+.st-done { color: var(--el-text-color-secondary); }
+
+.tc-title { font-size: 14px; font-weight: 600; color: var(--el-text-color-primary); margin-bottom: 4px; }
 .tc-desc {
   font-size: 12px;
-  color: #8a8f99;
+  color: var(--el-text-color-secondary);
   margin-bottom: 6px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -126,10 +149,10 @@ function onDragStart(e) {
   overflow: hidden;
 }
 .tc-foot { display: flex; justify-content: space-between; align-items: center; }
-.tc-meta { display: flex; align-items: center; gap: 8px; }
+.tc-meta { display: flex; align-items: center; gap: 10px; }
 .tc-assignee {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--el-text-color-secondary);
   display: inline-flex;
   align-items: center;
   gap: 3px;

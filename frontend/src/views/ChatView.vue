@@ -242,21 +242,21 @@ onMounted(async () => {
 <style scoped>
 .chat-page { display: flex; flex-direction: column; height: calc(100vh - 130px); }
 .chat-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
-.hint { color: #909399; font-size: 13px; flex: 1; }
+.hint { color: var(--el-text-color-secondary); font-size: 13px; flex: 1; }
 .guide { padding: 40px 24px 8px; }
-.guide-title { font-size: 20px; font-weight: 700; color: #303133; text-align: center; }
-.guide-sub { color: #909399; font-size: 13px; text-align: center; margin: 8px 0 18px; }
-.guide-bullets { max-width: 540px; margin: 0 auto; padding-left: 20px; color: #606266; font-size: 13px; line-height: 2.1; }
+.guide-title { font-size: 20px; font-weight: 700; color: var(--el-text-color-primary); text-align: center; }
+.guide-sub { color: var(--el-text-color-secondary); font-size: 13px; text-align: center; margin: 8px 0 18px; }
+.guide-bullets { max-width: 540px; margin: 0 auto; padding-left: 20px; color: var(--el-text-color-regular); font-size: 13px; line-height: 2.1; }
 .guide-actions { display: flex; justify-content: center; margin-top: 20px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 12px; }
 .chip { cursor: pointer; }
-.guide-note { margin-top: 16px; text-align: center; color: #b1b3b8; font-size: 12px; }
+.guide-note { margin-top: 16px; text-align: center; color: var(--el-text-color-placeholder); font-size: 12px; }
 .msg-area {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
-  background: #f5f7fa;
-  border-radius: 10px;
+  background: var(--el-fill-color);
+  border-radius: var(--squad-radius-card);
 }
 .typing { opacity: 0.7; }
 .suggest {
@@ -265,8 +265,8 @@ onMounted(async () => {
   gap: 10px;
   margin-top: 10px;
   padding: 8px 12px;
-  background: #fdf6ec;
-  border: 1px solid #f5dab1;
+  background: var(--el-color-warning-light-9);
+  border: 1px solid var(--el-color-warning-light-5);
   border-radius: 8px;
 }
 .suggest-text { flex: 1; color: #b88230; font-size: 13px; line-height: 1.6; }

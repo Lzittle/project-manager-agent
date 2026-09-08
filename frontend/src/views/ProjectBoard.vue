@@ -143,7 +143,7 @@ const tasks = ref([])
 const columns = [
   { status: 'todo', label: '待办', color: '#909399' },
   { status: 'doing', label: '进行中', color: '#4f46e5' },
-  { status: 'done', label: '已完成', color: '#67c23a' },
+  { status: 'done', label: '已完成', color: '#22c55e' },
 ]
 
 const taskDlg = reactive({ visible: false, title: '', description: '', priority: 'medium', submitting: false })
@@ -307,13 +307,13 @@ onMounted(async () => {
   border-radius: 8px;
 }
 .crumb-link { color: var(--el-color-primary); cursor: pointer; font-weight: 500; }
-.crumb-now { color: #303133; font-weight: 600; }
-.opt-child { color: #606266; font-size: 13px; }
+.crumb-now { color: var(--el-text-color-primary); font-weight: 600; }
+.opt-child { color: var(--el-text-color-regular); font-size: 13px; }
 .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
-.proj-desc { color: #909399; font-size: 13px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-desc { color: var(--el-text-color-secondary); font-size: 13px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }
 .board-col {
-  background: #ebeef5;
+  background: var(--el-border-color-lighter);
   border-radius: 10px;
   padding: 12px;
   min-height: 320px;
@@ -322,7 +322,7 @@ onMounted(async () => {
 .board-col.drop-over { background: #e0e7ff; outline: 2px dashed #4f46e5; }
 .col-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .col-dot { width: 10px; height: 10px; border-radius: 50%; }
-.col-title { font-weight: 600; color: #303133; }
+.col-title { font-weight: 600; color: var(--el-text-color-primary); }
 .col-body { min-height: 200px; }
-.dlg-tip { color: #909399; font-size: 12px; line-height: 1.5; margin-top: 4px; }
+.dlg-tip { color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.5; margin-top: 4px; }
 </style>

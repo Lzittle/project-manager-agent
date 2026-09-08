@@ -34,7 +34,7 @@ body { font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Microsoft YaHei
 
 .layout { height: 100%; }
 .header {
-  background: #fff;
+  background: var(--el-bg-color);
   border-bottom: 1px solid var(--el-border-color-lighter);
   display: flex;
   align-items: center;
@@ -42,13 +42,13 @@ body { font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Microsoft YaHei
   height: 56px !important;
   padding: 0 20px;
 }
-.header-title { font-size: 17px; font-weight: 700; color: #1f2329; }
-.header-crumb { font-size: 12px; font-weight: 400; color: #a8abb2; margin-left: 8px; }
+.header-title { font-size: 17px; font-weight: 700; color: var(--el-text-color-primary); }
+.header-crumb { font-size: 12px; font-weight: 400; color: var(--el-text-color-placeholder); margin-left: 8px; }
 .main {
-  background: #f4f5f9;
+  background: var(--el-bg-color-page);
   padding: 18px 20px;
   overflow-y: auto;
 }
-/* 页面卡片统一呼吸感 */
-.el-card { border-radius: var(--squad-radius); }
+/* 页面卡片统一呼吸感（其余 token 见 theme.css 全局 .el-card） */
+.el-card { border-radius: var(--squad-radius-card); }
 </style>

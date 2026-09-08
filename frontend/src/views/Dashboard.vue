@@ -183,11 +183,11 @@ const rootWithChildrenCount = computed(
 
 const cards = computed(() => [
   { label: '项目总数', value: rows.value.length, icon: Briefcase, bg: '#4f46e5' },
-  { label: '任务总数', value: stats.value.total, icon: Tickets, bg: '#7c3aed' },
-  { label: '待办任务', value: stats.value.todo, icon: Clock, bg: '#909399' },
+  { label: '任务总数', value: stats.value.total, icon: Tickets, bg: '#7c74ee' },
+  { label: '待办任务', value: stats.value.todo, icon: Clock, bg: '#6b7280' },
   { label: '进行中任务', value: stats.value.doing, icon: Loading, bg: '#e6a23c' },
   { label: '已完成任务', value: stats.value.done, icon: CircleCheck, bg: '#22c55e' },
-  { label: '已完成项目', value: doneProjectCount.value, icon: FolderOpened, bg: '#06b6d4' },
+  { label: '已完成项目', value: doneProjectCount.value, icon: FolderOpened, bg: '#6366f1' },
 ])
 
 // ---------- ECharts 状态分布环形图 ----------
@@ -294,15 +294,15 @@ function goBoard(project) {
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
-.stat-num { font-size: 26px; font-weight: 700; color: #1f2329; line-height: 1.2; }
-.stat-label { color: #909399; font-size: 13px; }
+.stat-num { font-size: 26px; font-weight: 700; color: var(--el-text-color-primary); line-height: 1.2; }
+.stat-label { color: var(--el-text-color-secondary); font-size: 13px; }
 .proj-cell { display: flex; flex-direction: column; gap: 6px; }
-.proj-name { font-weight: 600; color: #303133; }
+.proj-name { font-weight: 600; color: var(--el-text-color-primary); }
 .proj-kids { display: flex; flex-wrap: wrap; gap: 4px; }
 .proj-kid { cursor: pointer; }
 .proj-kid:hover { color: var(--el-color-primary); }
 .prog-cell { display: flex; flex-direction: column; gap: 4px; }
 .prog-row { display: flex; align-items: center; gap: 8px; }
-.prog-count { font-size: 12px; color: #909399; white-space: nowrap; }
+.prog-count { font-size: 12px; color: var(--el-text-color-secondary); white-space: nowrap; }
 .prog-tag { align-self: flex-start; }
 </style>

@@ -112,7 +112,7 @@ const rendered = computed(() => miniMd(props.content))
   flex-shrink: 0; color: #fff; font-size: 18px;
 }
 .avatar.assistant { background: #4f46e5; }
-.avatar.user { background: #67c23a; }
+.avatar.user { background: var(--el-color-success); }
 .bubble {
   padding: 10px 14px;
   border-radius: 10px;
@@ -121,7 +121,7 @@ const rendered = computed(() => miniMd(props.content))
   word-break: break-word;
   max-width: 100%;
 }
-.assistant .bubble { background: #fff; border: 1px solid #e4e7ed; color: #303133; }
+.assistant .bubble { background: #fff; border: 1px solid #e4e7ed; color: var(--el-text-color-primary); }
 .user .bubble { background: #4f46e5; color: #fff; }
 
 /* ---------- Agent 执行轨迹 ---------- */
@@ -129,21 +129,21 @@ const rendered = computed(() => miniMd(props.content))
 .trace-head {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 10px; cursor: pointer; user-select: none;
-  border-bottom: 1px solid #ebeef5;
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
-.trace-title { font-size: 13px; font-weight: 600; color: #606266; }
-.trace-caret { margin-left: auto; font-size: 12px; color: #909399; }
+.trace-title { font-size: 13px; font-weight: 600; color: var(--el-text-color-regular); }
+.trace-caret { margin-left: auto; font-size: 12px; color: var(--el-text-color-secondary); }
 .trace-body { padding: 6px 10px 8px; }
 .trace-step { display: flex; gap: 8px; padding: 5px 0; }
 .step-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
-.step-dot.ok { background: #67c23a; }
+.step-dot.ok { background: var(--el-color-success); }
 .step-dot.err { background: #f56c6c; }
 .step-main { flex: 1; min-width: 0; }
 .step-line { font-size: 13px; line-height: 1.6; }
-.step-label { font-weight: 600; color: #303133; margin-right: 6px; }
-.step-detail { color: #606266; }
+.step-label { font-weight: 600; color: var(--el-text-color-primary); margin-right: 6px; }
+.step-detail { color: var(--el-text-color-regular); }
 .step-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; }
-.step-ms { font-size: 12px; color: #b1b3b8; }
+.step-ms { font-size: 12px; color: var(--el-text-color-placeholder); }
 .ref-chip {
   display: inline-flex; align-items: center; gap: 4px;
   border: none; border-radius: 4px;
@@ -151,7 +151,7 @@ const rendered = computed(() => miniMd(props.content))
   cursor: pointer; background: #eef2ff; color: #4f46e5;
 }
 .ref-chip:hover { background: #d9ecff; }
-.ref-chip.task { background: #f0f9eb; color: #67c23a; }
+.ref-chip.task { background: var(--el-color-success-light-9); color: var(--el-color-success); }
 .ref-chip.task:hover { background: #e1f3d8; }
 .ref-kind { opacity: 0.75; }
 </style>

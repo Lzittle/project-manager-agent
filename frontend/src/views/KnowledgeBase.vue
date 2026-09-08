@@ -169,16 +169,16 @@ onMounted(async () => {
 
 <style scoped>
 .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
-.upload-text { color: #909399; font-size: 13px; line-height: 1.8; }
+.upload-text { color: var(--el-text-color-secondary); font-size: 13px; line-height: 1.8; }
 .doc-preview {
   white-space: pre-wrap;
   word-break: break-word;
-  background: #fafafa;
+  background: var(--el-fill-color-lighter);
   padding: 12px;
   border-radius: 6px;
   font-size: 13px;
   line-height: 1.7;
-  color: #303133;
+  color: var(--el-text-color-primary);
   max-height: 240px;
   overflow-y: auto;
 }
