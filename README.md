@@ -9,6 +9,12 @@
 [![Vue3](https://img.shields.io/badge/Vue-3.4-42b883)](https://vuejs.org)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](#)
 
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" alt="Squad 仪表盘指挥舱：整体完成率 + 项目进度轨道 + 需关注清单" width="920" style="max-width:100%; height:auto; border-radius:12px;" />
+  <br />
+  <em>指挥舱仪表盘 —— 完成率、项目进度轨道与「需关注」清单均来自真实任务数据</em>
+</p>
+
 ---
 
 ## 为什么做它（背景与痛点）
@@ -18,7 +24,7 @@
 | 小队的真实痛点 | 传统工具的做法 | Squad 的做法 |
 |---|---|---|
 | 项目目标到任务拆解全靠口头，标准不一 | 手动建任务、填字段、排优先级 | 一句话目标 → Agent **自主规划任务树**（含依赖）并入库 |
-| 进度靠站会/表格人工同步，前置延期影响说不清 | 看板手动拖拽，延期靠人肉通知 | 问"进度怎么样" → Agent **读真实数据**作答，依赖未就绪任务自动标记阻塞 |
+| 进度靠站会/表格人工同步，前置延期影响说不清 | 看板手动拖拽，延期靠人肉通知 | 问"进度怎么样" → Agent **读真实数据**作答，依赖未就绪的任务自动标记「待解锁」 |
 | 需求、会议纪要散落，新成员找不到"上次怎么定的" | 专门的文档系统，需另建库维护 | 会议纪要一键入库 → 对话时 **RAG 自动检索**注入，Agent 记得项目历史 |
 | 项目多、状态靠脑子记 | 全局仪表盘靠管理员配 | 状态实时派生，看板 / 仪表盘 / 对话三处一致 |
 
@@ -40,6 +46,15 @@ Squad 不是"套壳 ChatGPT 做文本总结"，而是具备 **ReAct 闭环**的�
 | 🔒 **确定性安全路由** | 高确定性场景代码层先裁决：跨项目写数据拦截、只给数量没给明细先追问、纯规划直行——把模型幻觉和串扰掐在源头 | 绑定 A 却说"给 B 规划" → 拦截提示先切换，绝不建错项目 |
 
 > 架构上刻意**手写工具循环**（约 300 行，`backend/core/agent.py`）而非套 LangChain 黑盒——每步决策可打印、可调试、可测试。
+
+**执行轨迹可视化**：Agent 每一步工具调用（工具名 / 摘要 / 耗时 / 影响的实体）都会落库并在对话下方时间线回放，行为全程可观测、可审计。
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/chat-agent-trace.png" alt="AI 对话页：自然语言下发指令" width="440" style="max-width:100%; height:auto; border-radius:10px;" /><br/><em>自然语言对话：绑定项目后一句话推进任务</em></td>
+    <td align="center"><img src="docs/screenshots/chat-agent-trace2.png" alt="Agent 执行轨迹时间线回放" width="440" style="max-width:100%; height:auto; border-radius:10px;" /><br/><em>执行轨迹回放：工具调用步骤一目了然，实体可点击直达看板</em></td>
+  </tr>
+</table>
 
 ---
 
