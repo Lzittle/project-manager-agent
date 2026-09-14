@@ -640,9 +640,18 @@ watch(() => store.currentId, () => { reloadAll() })
 .ws-preview p { margin: 0; font-size: var(--p-fs-meta); color: var(--ws-fg2); line-height: var(--p-lh-ui); }
 
 /* 中：对话 */
-.ws-chat { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
-.ws-thin { display: flex; flex-direction: column; flex: 1; width: 100%; max-width: 620px; min-width: 0; margin: 0 auto; }
-.ws-thread { flex: 1; min-height: 220px; overflow-y: auto; padding: 16px; }
+.ws-chat { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* 中列必须能一路收缩：只有对话区滚动，输入框永远留在视口里 */
+.ws-thin {
+  display: flex; flex-direction: column;
+  flex: 1 1 auto; min-height: 0; min-width: 0;
+  width: 100%;
+  /* 阅读宽度用 rem + vw 双重约束：字号调大时列宽跟着大（每行字数不变），
+     窗口变宽时也会长，但始终不超过 50rem，避免行长失控 */
+  max-width: min(100%, clamp(34rem, 52vw, 50rem));
+  margin: 0 auto;
+}
+.ws-thread { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px; }
 .ws-hello-title { margin: 0 0 10px; font-size: var(--p-fs-body); line-height: var(--p-lh-read); color: var(--ws-fg2); }
 .ws-suggest { display: flex; flex-wrap: wrap; gap: 6px; }
 .ws-act {
@@ -651,7 +660,7 @@ watch(() => store.currentId, () => { reloadAll() })
   border-radius: var(--ws-radius-sm); background: var(--ws-surface); color: var(--ws-fg2);
 }
 .ws-typing { color: var(--ws-fg3); font-size: var(--p-fs-meta); }
-.ws-composer { border-top: 1px solid var(--ws-line); padding: 12px 16px 14px; }
+.ws-composer { flex: 0 0 auto; border-top: 1px solid var(--ws-line); padding: 12px 16px 14px; }
 .ws-input {
   display: block; width: 100%; box-sizing: border-box;
   font: inherit; font-size: var(--p-fs-body); color: var(--ws-fg);
