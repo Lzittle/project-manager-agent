@@ -23,7 +23,6 @@
           class="ws-pick"
           size="small"
           placeholder="选择项目"
-          @change="reloadAll"
         >
           <el-option :value="0" label="全局 · 不绑定项目" />
           <el-option v-for="row in store.treeRows" :key="row.id" :value="row.id" :label="row.name" />
@@ -71,7 +70,7 @@
           <span class="ws-filenote">{{ doc.doc_type || '文档' }}</span>
         </button>
         <div v-if="!documents.length" class="ws-empty-small">
-          {{ store.currentId ? '这个项目还没有记忆文档' : '先选一个项目' }}
+          {{ store.currentId ? '这个项目还没有记忆文档' : '先在顶部选一个项目' }}
         </div>
 
         <div class="ws-preview">
@@ -159,7 +158,7 @@
         <!-- 全队：预览（默认）或看板（全屏） -->
         <template v-else>
           <div v-if="!visibleTasks.length" class="ws-empty-small">
-            {{ store.currentId ? '这个项目还没有任务，跟左边说一句就会长出来。' : '先在左边选一个项目，或直接跟 Squad 说一句。' }}
+            {{ store.currentId ? '这个项目还没有任务，跟左边说一句就会长出来。' : '先在顶部选一个项目，或者直接跟 Squad 说一句。' }}
           </div>
           <div v-else-if="!liveFull" class="ws-preview-list">
             <button
