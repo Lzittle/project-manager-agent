@@ -112,8 +112,8 @@ const rendered = computed(() => miniMd(props.content))
 .chat-row.user .msg-col { align-items: flex-end; }
 
 .who {
-  font-size: 11px;
-  color: var(--el-text-color-placeholder);
+  font-size: var(--p-fs-tag);
+  color: var(--p-ink-3);
   margin: 0 4px 3px;
   letter-spacing: 0.04em;
 }
@@ -125,34 +125,34 @@ const rendered = computed(() => miniMd(props.content))
   flex-shrink: 0; color: #fff; font-size: 16px;
   box-shadow: var(--el-box-shadow-lighter);
 }
-.avatar.assistant { background: linear-gradient(135deg, #0d9488, #0f766e 60%, #0b4a45); }
-.avatar.user { background: var(--el-fill-color-dark); color: var(--el-text-color-regular); }
+.avatar.assistant { background: linear-gradient(135deg, #14a08f, var(--p-brand) 60%, var(--p-brand-strong)); }
+.avatar.user { background: var(--p-line-soft); color: var(--p-ink-2); }
 
 .bubble {
   padding: 10px 14px;
   border-radius: 14px;
-  font-size: 14px;
-  line-height: 1.75;
+  font-size: var(--p-fs-body);
+  line-height: var(--p-lh-read);
   word-break: break-word;
   max-width: 100%;
 }
 .assistant .bubble {
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-light);
-  color: var(--el-text-color-primary);
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-soft);
+  color: var(--p-ink);
   border-top-left-radius: 4px;
-  box-shadow: var(--el-box-shadow-light);
+  box-shadow: 0 1px 2px rgba(16, 22, 25, 0.04);
 }
 .user .bubble {
-  background: var(--el-color-primary-light-9);
-  border: 1px solid var(--el-color-primary-light-7);
-  color: var(--el-text-color-primary);
+  background: var(--p-brand-wash);
+  border: 1px solid var(--p-brand-line);
+  color: var(--p-ink);
   border-top-right-radius: 4px;
 }
 
 /* 轻量 markdown 内部排版 */
-.bubble :deep(.mm-h1) { font-size: 15px; font-weight: 700; margin: 8px 0 4px; }
-.bubble :deep(.mm-h2), .bubble :deep(.mm-h3) { font-size: 14px; font-weight: 700; margin: 6px 0 2px; }
+.bubble :deep(.mm-h1) { font-size: var(--p-fs-title); font-weight: 700; margin: 8px 0 4px; }
+.bubble :deep(.mm-h2), .bubble :deep(.mm-h3) { font-size: var(--p-fs-ui); font-weight: 700; margin: 6px 0 2px; }
 .bubble :deep(.mm-list) { margin: 4px 0; padding-left: 20px; }
 .bubble :deep(.mm-ol) { list-style: decimal; }
 .bubble :deep(.mm-gap) { height: 7px; }
@@ -183,7 +183,7 @@ const rendered = computed(() => miniMd(props.content))
 .trace-pulse.ok { background: var(--el-color-success); box-shadow: 0 0 0 3px var(--el-color-success-light-9); }
 .trace-pulse.part { background: var(--el-color-warning); box-shadow: 0 0 0 3px var(--el-color-warning-light-9); }
 .trace-title { font-size: 12px; font-weight: 600; color: var(--el-text-color-regular); }
-.trace-caret { margin-left: auto; font-size: 12px; color: var(--el-text-color-secondary); }
+.trace-caret { margin-left: auto; font-size: var(--p-fs-tag); color: var(--el-text-color-secondary); }
 
 .trace-body { padding: 4px 0 8px; }
 .trace-step {
@@ -204,11 +204,11 @@ const rendered = computed(() => miniMd(props.content))
 .step-dot.ok { background: var(--el-color-success); }
 .step-dot.err { background: var(--el-color-danger); }
 .step-main { flex: 1; min-width: 0; }
-.step-line { font-size: 13px; line-height: 1.6; }
+.step-line { font-size: var(--p-fs-ui); line-height: 1.6; }
 .step-label { font-weight: 600; color: var(--el-text-color-primary); margin-right: 4px; }
 .step-detail { color: var(--el-text-color-regular); word-break: break-word; }
 .step-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 3px; }
-.step-ms { font-size: 11px; color: var(--el-text-color-placeholder); font-variant-numeric: tabular-nums; }
+.step-ms { font-size: var(--p-fs-tag); color: var(--el-text-color-placeholder); font-variant-numeric: tabular-nums; }
 .ref-chip {
   display: inline-flex; align-items: center; gap: 4px;
   border: none; border-radius: 7px;
