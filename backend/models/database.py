@@ -1,10 +1,10 @@
 """SQLAlchemy 数据库模型：业务表 + 引擎/Session 管理。
 
 表清单：users / projects / tasks / task_dependencies / task_comments /
-       chat_messages / knowledge_documents
+       chat_messages / knowledge_documents / plan_runs
 关联：用户 1-N 项目；项目 1-N 任务；任务 1-N 评论；任务 N-N 任务（依赖，经
       task_dependencies 桥接）；用户 1-N 任务(assignee)；项目 1-N 知识库文档；
-      用户 1-N 聊天消息
+      用户 1-N 聊天消息；项目 1-N 规划批次(plan_runs)
 """
 from datetime import datetime, date
 from sqlalchemy import (
@@ -193,3 +193,22 @@ class KnowledgeDocument(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     project = relationship("Project", back_populates="documents")
+
+
+class PlanRun(Base):
+    """任务规划批次表：记录每次「自动规划」落了哪些任务，供幂等复用与审计。
+
+    用途：同一项目短时间内被重复触达规划时（用户以为卡住重发、连点两次按钮），
+    直接复用上一批任务，而不是再建一批 —— 演示库里项目 1 涨到 21 条任务就是
+    这么来的。
+    时间戳取 Python 侧 datetime.now()：本表只与自身的时间做窗口比较，
+    保持同一时钟，避免与 SQLite server_default 的 UTC 时间混用。
+    """
+    __tablename__ = "plan_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    task_ids = Column(Text, default="[]")  # 本批次任务 id 的 JSON 数组（保序）
+    task_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.now, index=True)

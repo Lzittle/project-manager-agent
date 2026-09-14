@@ -65,18 +65,21 @@ def update_project(project_id: int, body: ProjectUpdate, db: Session = Depends(g
 @router.post("/{project_id}/plan")
 def plan_project_tasks(project_id: int,
                        user_id: int = Query(..., description="当前用户 id"),
+                       force: bool = Query(False, description="true=跳过幂等窗口，强制再规划一批"),
                        db: Session = Depends(get_db)):
     """看板「一键规划」：按项目主题让 AI 自动生成并创建任务（与对话内规划同一条代码路径）。
 
     供新建项目弹窗勾选「创建后由 AI 自动规划任务」调用；LLM 生成失败等异常返回 400。
+    幂等：同一项目短时间内重复触达 → 复用上一批（reused=true，planned=上一批数量），
+    确实要再规划一批新任务时传 force=true。
     """
     if project_service.get_project(db, project_id) is None:
         raise HTTPException(404, f"项目 {project_id} 不存在")
-    res = _ToolExecutor(user_id, project_id).plan_tasks()
+    res = _ToolExecutor(user_id, project_id).plan_tasks(force=force)
     if not res.get("ok"):
         raise HTTPException(400, res.get("error", "任务规划失败"))
     return {"planned": len(res["data"]), "tasks": res["data"],
-            "note": res.get("note", "")}
+            "note": res.get("note", ""), "reused": bool(res.get("reused"))}
 
 
 @router.delete("/{project_id}")

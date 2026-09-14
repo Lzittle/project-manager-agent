@@ -15,11 +15,12 @@
 import json
 import re
 import time
+from datetime import datetime
 from typing import Any, Optional
 
 from core import llm
 from core.rag import search as rag_search
-from models.database import SessionLocal, Project
+from models.database import SessionLocal, Project, Task, PlanRun
 from services import knowledge_service, project_service, task_service
 
 MAX_ITER = 8  # 单轮最多工具迭代次数，防死循环
@@ -46,6 +47,7 @@ def build_system_prompt(project_id: Optional[int] = None,
    - 改标题/改描述/优化/调优先级/改名 → update_task_fields / update_project_fields；
    - 执行删除/修改前先用 list_tasks/list_projects 查到真实 id，对象不明确就先列出来问用户，绝不猜 id；
    - 用户只说「加 N 个任务」却没给内容时，先请用户补充内容，绝不自动规划一整套；
+   - 「任务清单/任务列表/看板/进度」是只读请求：基于已有任务数据回答，禁止调用 plan_tasks 新建一批；
    - 用户说「把结论记下来/存成会议纪要/归档/记进资料库/沉淀一下」→ 调用 save_meeting，
      把本次对话中双方确认过的结论/决策/下一步行动整理成纪要入库（内容忠于本次对话，不得编造）。"""
     if project_id is not None:
@@ -68,6 +70,8 @@ _PLAN_HINT_WORDS = ("拆解", "分解", "帮我规划", "规划任务", "任务�
 # 出现在话术里多为「查询/检索知识库」而非「自动规划」，命中则不强制路由
 _PLAN_NOISE = ("文档", "资料", "知识库", "检索", "搜索", "找一下",
                "查一下", "有什么", "有哪些", "怎么", "如何")
+# 「任务」后面紧跟这些词 → 是「看清单/看列表」这类只读请求，不是写或规划
+_TASK_READONLY_AFTER = r"(?!清单|列表|表格)"
 
 
 def is_plan_intent(text: str) -> bool:
@@ -82,7 +86,7 @@ def is_plan_intent(text: str) -> bool:
         return False
     if any(w in t for w in _PLAN_HINT_WORDS):
         return True
-    return bool(re.search(r"(?:生成|规划|安排)\S{0,6}任务", t))
+    return bool(re.search(rf"(?:生成|规划|安排)\S{{0,6}}任务{_TASK_READONLY_AFTER}", t))
 
 
 def find_project_mention(db, user_id: int, bound_project_id: int, text: str):
@@ -106,13 +110,14 @@ _TASK_DEL_HINT = re.compile(
     r"(?:删|删除|移除|清理|划掉|去掉)\S{0,12}(?:任务|项目)|(?:任务|项目)\S{0,8}(?:删|删除|划掉|移除)")
 # 进度/状态查询（只读，不写数据）：命中则由代码层先注入真实任务数据再让模型作答
 _PROGRESS_HINT = re.compile(
-    r"进度|进展|怎么样了|还剩|还有哪些|任务列表|看看任务|查看任务|任务情况|"
+    r"进度|进展|怎么样了|还剩|还有哪些|任务列表|任务清单|看看任务|查看任务|任务情况|"
     r"完成情况|完成多少|多少任务|进行到|当前状态|目前状态|做到哪|状态如何|状态分布|任务状态|"
     r"有几条|有哪些任务")
 # 出现写动作（加/删/改/规划/状态流转）时不算纯查询，交给对应写工具/写路由
 _WRITE_ACTION = re.compile(
     r"(?:加|建|创建|新增|添加|安排|补|删|删除|移除|清理|划掉|去掉|"
-    r"改|编辑|更新|标记|设为|调|规划|拆解|分解|生成|安排|推进|开始|完成)\S{0,6}(?:任务|项目|状态|优先级|描述|标题)")
+    r"改|编辑|更新|标记|设为|调|规划|拆解|分解|生成|安排|推进|开始|完成)\S{0,6}"
+    r"(?:任务|项目|状态|优先级|描述|标题)" + _TASK_READONLY_AFTER)
 # 出现「数量 + 个任务」（如：加两个任务 / 增加 3 个任务 / 加几个任务）
 _COUNT_TASK = re.compile(r"(?:[0-9]+|[一二两三四五六七八九十]|两|几|多)\s*个\s*任务")
 # 已给出任务明细的特征（引号包裹 或 「任务：」冒号后跟内容）
@@ -303,8 +308,12 @@ TOOLS: list[dict] = [
         "plan_tasks",
         "为指定项目自动规划一组任务：根据项目主题调用大模型生成约 5 条落地任务并创建入库（统一默认待办）。"
         "仅用于「按主题拆解整套任务」；若用户明确给了任务数量+明细（如加 2 个任务：A/B），必须用 create_task 逐个创建，禁止误用本工具。"
-        "project_id 可省略：省略时默认当前绑定的项目（若未绑定则必须提供）",
-        {"project_id": {"type": "integer", "description": "要规划任务的项目 id（可省略，默认当前绑定项目）"}},
+        "「任务清单/任务列表/进度」类只读请求禁止使用本工具。"
+        "project_id 可省略：省略时默认当前绑定的项目（若未绑定则必须提供）。"
+        "force 仅在用户明确要求「重新规划/再来一批」时才传 true",
+        {"project_id": {"type": "integer", "description": "要规划任务的项目 id（可省略，默认当前绑定项目）"},
+         "force": {"type": "boolean",
+                   "description": "true=用户明确要求重新规划一批新任务；默认 false 时，该项目刚规划过会直接复用上一批，不重复创建"}},
         [],
     ),
 ]
@@ -346,6 +355,9 @@ def build_tools(project_id: Optional[int] = None) -> list[dict]:
 
 # ---------- 工具执行（业务逻辑经 services 层，user_id 由会话注入不暴露给模型） ----------
 class _ToolExecutor:
+    # 同一项目重复规划的复用窗口（秒）：窗口内重复触达 → 复用上一批，不再新建
+    PLAN_DEDUP_WINDOW_SEC = 300
+
     def __init__(self, user_id: int, project_id: Optional[int] = None):
         self.user_id = user_id
         self.project_id = project_id
@@ -648,7 +660,8 @@ class _ToolExecutor:
                        if k in args and args[k] not in (None, "")]
             detail = f"任务「{data.get('title','')}」已更新（{'/'.join(changed) or '字段'}）"
         elif name == "plan_tasks" and isinstance(data, list):
-            detail = f"生成 {len(data)} 条任务并入库（默认待办）"
+            detail = (f"复用上一批 {len(data)} 条任务（未重复创建）" if result.get("reused")
+                      else f"生成 {len(data)} 条任务并入库（默认待办）")
         elif name == "list_projects" and isinstance(data, list):
             detail = f"共 {len(data)} 个项目"
         elif name == "list_tasks" and isinstance(data, list):
@@ -717,12 +730,48 @@ class _ToolExecutor:
                 })
         return out
 
-    def plan_tasks(self, project_id: Optional[int] = None, goal: str = "") -> dict:
+    def _recent_plan(self, pid: int) -> Optional[dict]:
+        """窗口内该项目刚规划过 → 返回上一批复用结果；否则 None（走正常规划）。
+
+        幂等护栏：用户以为卡住重发、连点两次「一键规划」时，第二次直接复用上一批
+        任务，而不是再生成一批。上一批任务若已被删除/重置，本护栏自动失效。
+        """
+        db = SessionLocal()
+        try:
+            run = (db.query(PlanRun)
+                   .filter(PlanRun.project_id == pid, PlanRun.user_id == self.user_id)
+                   .order_by(PlanRun.id.desc()).first())
+            if run is None or run.created_at is None:
+                return None
+            age = (datetime.now() - run.created_at).total_seconds()
+            if age < 0 or age > self.PLAN_DEDUP_WINDOW_SEC:
+                return None
+            ids = json.loads(run.task_ids or "[]")
+            if not ids:
+                return None
+            rows = {t.id: t for t in db.query(Task).filter(Task.id.in_(ids)).all()}
+            ordered = [rows[i] for i in ids if i in rows]
+            if not ordered:
+                return None  # 上一批已被删除 → 正常规划
+            minutes = max(1, int(age // 60))
+            return {
+                "ok": True,
+                "reused": True,
+                "data": [{"id": t.id, "title": t.title, "status": t.status} for t in ordered],
+                "note": (f"该项目 {minutes} 分钟前刚规划过 {len(ordered)} 个任务，本次直接复用上一批、"
+                         "未重复创建；如需再规划一批新任务，请说「重新规划任务」。"),
+            }
+        finally:
+            db.close()
+
+    def plan_tasks(self, project_id: Optional[int] = None, goal: str = "",
+                   force: bool = False) -> dict:
         """上下文感知的任务规划（AI 全流程）：
         1) 读项目已有任务清单 → 已有任务则「增量补缺」，防重复生成；
         2) RAG 检索项目记忆（会议纪要/需求文档）→ 任务贴合历史决策；
         3) 数量按项目复杂度 3~8 条自适应，不再写死 5 条；
         4) 落库带 depends_on 真实依赖边。
+        5) 幂等：窗口内重复触达 → 复用上一批（见 _recent_plan），force=True 可跳过。
         主题一律取项目自身名称与描述，不接受模型传入的 goal，
         避免模型受历史话术误导、给别的主题生成任务。
         """
@@ -730,6 +779,12 @@ class _ToolExecutor:
         pid = project_id or self.project_id
         if pid is None:
             return {"ok": False, "error": "未指定项目：请先绑定项目或在话术中说明项目名称"}
+
+        # 0) 幂等护栏：刚规划过就直接复用上一批（force=True 跳过）
+        if not force:
+            reused = self._recent_plan(pid)
+            if reused is not None:
+                return reused
 
         # 1) 项目信息 + 已有任务清单 + RAG 项目记忆（一次性读取）
         db = SessionLocal()
@@ -817,6 +872,10 @@ class _ToolExecutor:
                         if ok:
                             dep_created += 1
             mode = "增量补充" if existing_count else "从零规划"
+            db.add(PlanRun(project_id=pid, user_id=self.user_id,
+                           task_ids=json.dumps([tk.id for tk in created]),
+                           task_count=len(created)))
+            db.commit()
             return {
                 "ok": True,
                 "data": [{"id": tk.id, "title": tk.title, "status": tk.status} for tk in created],

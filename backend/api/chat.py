@@ -39,6 +39,9 @@ def _format_plan_reply(res: dict, project_name: str | None) -> str:
     name = project_name or "该项目"
     lines = "\n".join(f"{i}. {t['title']}" for i, t in enumerate(tasks, 1))
     note = res.get("note", "")
+    if res.get("reused"):  # 幂等命中：复用上一批，不重复创建
+        return (f"「{name}」刚刚已经规划过一批任务（共 {len(tasks)} 个），本次没有重复创建：\n"
+                f"{lines}\n{note}")
     return f"已为「{name}」自动规划 {len(tasks)} 个任务：\n{lines}\n{note}"
 
 

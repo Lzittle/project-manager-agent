@@ -995,3 +995,85 @@ def test_plan_adaptive_count_prompt(client, monkeypatch):
     assert "任务数量不设固定值" in seen["sys"]
     assert "3~4" in seen["sys"] or "自适应" in seen["sys"]
     assert "depends_on" in seen["sys"]  # 依赖树规则仍保留
+
+
+# ---------- 回归：只读清单不得被误判为规划 ----------
+
+def test_plan_intent_excludes_readonly_list():
+    """「任务清单/任务列表」是只读说法，不能命中规划意图（此前会被当成自动规划）。"""
+    from core.agent import is_plan_intent
+
+    assert is_plan_intent("帮我规划几个任务") is True
+    assert is_plan_intent("生成任务") is True
+    assert is_plan_intent("生成任务清单") is False
+    assert is_plan_intent("给我生成一份任务列表") is False
+
+
+def test_chat_readonly_task_list_does_not_plan(client, monkeypatch):
+    """回归：绑定项目时说「生成任务清单」→ 先读真实数据作答，不调规划、不写库。"""
+    from types import SimpleNamespace
+
+    def fake_chat(messages, **kwargs):
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+            content="当前项目共有 1 个任务：清单里的任务", tool_calls=None))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+    p = _new_project(client, "清单只读项目")
+    _new_task(client, p["id"], "清单里的任务")
+
+    r = client.post("/api/chat/send",
+                    json={"message": "生成任务清单", "user_id": 1, "project_id": p["id"]})
+    assert r.status_code == 200
+    tools = [s["tool"] for s in r.json()["trace"]]
+    assert "plan_tasks" not in tools          # 不得走自动规划
+    assert "project_snapshot" in tools        # 而是先读真实数据再作答
+    assert len(client.get(f"/api/tasks?project_id={p['id']}").json()) == 1  # 零新增
+
+
+# ---------- 回归：重复规划幂等 ----------
+
+def _fake_plan_chat(monkeypatch, titles=("幂等任务甲", "幂等任务乙")):
+    """让规划用的 LLM 稳定返回给定标题的任务数组。"""
+    from types import SimpleNamespace
+
+    payload = "[" + ",".join(
+        '{"title":"%s","description":"d","priority":"medium"}' % t for t in titles) + "]"
+
+    def fake_chat(messages, **kwargs):
+        return SimpleNamespace(choices=[
+            SimpleNamespace(message=SimpleNamespace(content=payload))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+
+
+def test_plan_twice_within_window_reuses_batch(client, monkeypatch):
+    """回归：同一项目短时间内重复规划 → 第二次复用上一批、任务不翻倍；force 可强制再规划。"""
+    _fake_plan_chat(monkeypatch)
+    p = _new_project(client, "幂等规划项目")
+
+    first = client.post(f"/api/projects/{p['id']}/plan", params={"user_id": 1}).json()
+    assert first["planned"] == 2 and first["reused"] is False
+
+    second = client.post(f"/api/projects/{p['id']}/plan", params={"user_id": 1}).json()
+    assert second["planned"] == 2 and second["reused"] is True
+    assert "未重复创建" in second["note"]
+    assert len(client.get(f"/api/tasks?project_id={p['id']}").json()) == 2
+
+    forced = client.post(f"/api/projects/{p['id']}/plan",
+                         params={"user_id": 1, "force": "true"}).json()
+    assert forced["planned"] == 2 and forced["reused"] is False
+    assert len(client.get(f"/api/tasks?project_id={p['id']}").json()) == 4
+
+
+def test_chat_plan_repeat_reuses_batch(client, monkeypatch):
+    """回归：对话里「帮我规划几个任务」连发两次 → 第二次复用上一批，只落一批任务。"""
+    _fake_plan_chat(monkeypatch, titles=("对话幂等任务",))
+    p = _new_project(client, "对话幂等项目")
+
+    for _ in range(2):
+        r = client.post("/api/chat/send",
+                        json={"message": "帮我规划几个任务", "user_id": 1, "project_id": p["id"]})
+        assert r.status_code == 200
+
+    tasks = client.get(f"/api/tasks?project_id={p['id']}").json()
+    assert len(tasks) == 1  # 两次请求只落一批
