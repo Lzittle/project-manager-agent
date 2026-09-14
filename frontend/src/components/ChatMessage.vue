@@ -113,14 +113,14 @@ const rendered = computed(() => miniMd(props.content))
 
 .who {
   font-size: var(--p-fs-tag);
-  color: var(--p-ink-3);
+  color: var(--p-ink-2);
   margin: 0 4px 3px;
   letter-spacing: 0.04em;
 }
 
 .avatar {
   width: 32px; height: 32px; margin-top: 18px;
-  border-radius: 10px;
+  border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0; color: #fff; font-size: 16px;
   box-shadow: var(--el-box-shadow-lighter);
@@ -130,7 +130,7 @@ const rendered = computed(() => miniMd(props.content))
 
 .bubble {
   padding: 10px 14px;
-  border-radius: 14px;
+  border-radius: var(--p-r-lg);
   font-size: var(--p-fs-body);
   line-height: var(--p-lh-read);
   word-break: break-word;
@@ -160,30 +160,30 @@ const rendered = computed(() => miniMd(props.content))
   background: var(--el-fill-color);
   border: 1px solid var(--el-border-color-extra-light);
   padding: 1px 5px;
-  border-radius: 5px;
-  font-size: 12px;
+  border-radius: var(--p-r-xs);
+  font-size: var(--p-fs-tag);
   font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
-  color: var(--el-color-primary-dark-2);
+  color: var(--p-brand-strong);
 }
 
 /* ---------- Agent 执行轨迹 ---------- */
 .trace {
   margin-top: 8px;
   width: 100%;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 12px;
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-r-sm);
   overflow: hidden;
-  background: var(--el-fill-color-lighter);
+  background: var(--p-canvas);
 }
 .trace-head {
   display: flex; align-items: center; gap: 8px;
   padding: 7px 12px; cursor: pointer; user-select: none;
 }
 .trace-pulse { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.trace-pulse.ok { background: var(--el-color-success); box-shadow: 0 0 0 3px var(--el-color-success-light-9); }
-.trace-pulse.part { background: var(--el-color-warning); box-shadow: 0 0 0 3px var(--el-color-warning-light-9); }
-.trace-title { font-size: 12px; font-weight: 600; color: var(--el-text-color-regular); }
-.trace-caret { margin-left: auto; font-size: var(--p-fs-tag); color: var(--el-text-color-secondary); }
+.trace-pulse.ok { background: var(--p-ok); box-shadow: 0 0 0 3px var(--p-block-mint); }
+.trace-pulse.part { background: var(--p-on-peach); box-shadow: 0 0 0 3px var(--p-block-peach); }
+.trace-title { font-size: var(--p-fs-tag); font-weight: 600; color: var(--p-ink-2); }
+.trace-caret { margin-left: auto; font-size: var(--p-fs-tag); color: var(--p-ink-2); }
 
 .trace-body { padding: 4px 0 8px; }
 .trace-step {
@@ -195,29 +195,29 @@ const rendered = computed(() => miniMd(props.content))
   content: '';
   position: absolute;
   left: 15px; top: 0; height: 100%;
-  border-left: 1px dashed var(--el-border-color-light);
+  border-left: 1px dashed var(--p-line);
 }
 .step-dot {
   width: 7px; height: 7px; border-radius: 50%;
   margin-top: 6px; flex-shrink: 0; position: relative; z-index: 1;
 }
-.step-dot.ok { background: var(--el-color-success); }
-.step-dot.err { background: var(--el-color-danger); }
+.step-dot.ok { background: var(--p-ok); }
+.step-dot.err { background: var(--p-danger); }
 .step-main { flex: 1; min-width: 0; }
 .step-line { font-size: var(--p-fs-ui); line-height: 1.6; }
-.step-label { font-weight: 600; color: var(--el-text-color-primary); margin-right: 4px; }
-.step-detail { color: var(--el-text-color-regular); word-break: break-word; }
+.step-label { font-weight: 600; color: var(--p-ink); margin-right: 4px; }
+.step-detail { color: var(--p-ink-2); word-break: break-word; }
 .step-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 3px; }
-.step-ms { font-size: var(--p-fs-tag); color: var(--el-text-color-placeholder); font-variant-numeric: tabular-nums; }
+.step-ms { font-size: var(--p-fs-tag); color: var(--p-ink-2); font-variant-numeric: tabular-nums; }
 .ref-chip {
   display: inline-flex; align-items: center; gap: 4px;
-  border: none; border-radius: 7px;
-  font-size: 12px; line-height: 1.4; padding: 3px 8px;
+  border: none; border-radius: var(--p-r-sm);
+  font-size: var(--p-fs-tag); line-height: 1.4; padding: 3px 8px;
   cursor: pointer;
 }
-.ref-chip.project { background: var(--el-color-primary-light-9); color: var(--el-color-primary-dark-2); }
-.ref-chip.project:hover { background: var(--el-color-primary-light-8); }
-.ref-chip.task { background: var(--el-color-success-light-9); color: var(--el-color-success-dark-2); }
-.ref-chip.task:hover { background: var(--el-color-success-light-8); }
+.ref-chip.project { background: var(--p-brand-wash); color: var(--p-brand-strong); }
+.ref-chip.project:hover { background: var(--p-brand-line); }
+.ref-chip.task { background: var(--p-block-plain); color: var(--p-ink-2); }
+.ref-chip.task:hover { background: var(--p-line); }
 .ref-arrow { opacity: 0.6; }
 </style>

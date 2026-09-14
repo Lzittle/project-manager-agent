@@ -34,6 +34,14 @@
         <button class="ws-chip" :class="{ on: liveOpen }" type="button" @click="toggleLive">任务</button>
       </div>
 
+      <button
+        class="ws-chip ws-fontbtn"
+        type="button"
+        :aria-label="'字号：' + fontLabel + '，点击切换下一档'"
+        @click="cycleFont"
+      >Aa · {{ fontLabel }}</button>
+      <span class="ws-sr" aria-live="polite">字号已切到{{ fontLabel }}</span>
+
       <span class="ws-avatar">{{ meName.slice(0, 1).toUpperCase() }}</span>
     </header>
 
@@ -125,8 +133,8 @@
             <span>{{ liveSummary }}</span>
           </div>
           <div class="ws-liveacts">
-            <span class="ws-sync">跟随对话</span>
-            <button class="ws-chip" type="button" @click="liveFull = !liveFull">
+            <span class="ws-follow"><i class="ws-followdot" aria-hidden="true"></i>跟随对话</span>
+            <button class="ws-btn" type="button" @click="liveFull = !liveFull">
               {{ liveFull ? '退出全屏' : '全屏' }}
             </button>
           </div>
@@ -191,6 +199,7 @@
                 <span class="ws-rowtitle">{{ t.title }}</span>
                 <span v-if="isBlocked(t)" class="ws-rowwarn">待解锁</span>
               </span>
+              <span v-if="isFresh(t)" class="ws-fresh">新</span>
               <span class="ws-pava" :class="{ empty: !t.assignee_name }">{{ t.assignee_name ? t.assignee_name.slice(-1) : '+' }}</span>
             </button>
             <div v-if="visibleTasks.length > 4" class="ws-more">
@@ -199,7 +208,7 @@
             <div class="ws-hint">点上面任意一条 → 展开成全屏看板</div>
           </div>
           <div v-else class="ws-board" :class="{ one: filter !== 'all' }">
-            <section v-for="col in visibleColumns" :key="col.key" class="ws-col">
+            <section v-for="col in visibleColumns" :key="col.key" class="ws-col" :class="'ws-col-' + col.key">
               <div class="ws-colhead">
                 <i class="ws-dot" :class="col.dot" aria-hidden="true" />
                 <span>{{ col.label }}</span>
@@ -217,6 +226,7 @@
                 <div class="ws-cardfoot">
                   <span class="ws-pava" :class="{ empty: !t.assignee_name }">{{ t.assignee_name ? t.assignee_name.slice(-1) : '+' }}</span>
                   <span class="ws-who">{{ t.assignee_name || '未分配' }}</span>
+                  <span v-if="isFresh(t)" class="ws-fresh">新</span>
                 </div>
               </article>
             </section>
@@ -243,6 +253,34 @@ const filter = ref('all')          // all | todo | doing
 const assetsOpen = ref(true)
 const liveOpen = ref(true)
 const liveFull = ref(false)
+
+// 字号三档：改的是 html 的 font-size，全站 rem 字号跟着缩放，档位记在本地
+const FONT_SCALES = [
+  { key: 'small', label: '小', root: '93.75%' },
+  { key: 'normal', label: '标准', root: '100%' },
+  { key: 'large', label: '大', root: '112.5%' },
+]
+const fontIndex = ref(1)
+const fontLabel = computed(() => FONT_SCALES[fontIndex.value].label)
+
+function applyFontScale(index, persist = true) {
+  fontIndex.value = index
+  document.documentElement.style.fontSize = FONT_SCALES[index].root
+  if (persist) {
+    try { localStorage.setItem('squad.fontScale', FONT_SCALES[index].key) } catch { /* 隐私模式下忽略 */ }
+  }
+}
+
+function cycleFont() {
+  applyFontScale((fontIndex.value + 1) % FONT_SCALES.length)
+}
+
+// 「新」= 24 小时内创建的任务：第 4 个软色块（rose）只用于这种瞬时变化
+function isFresh(t) {
+  if (!t.created_at) return false
+  const ms = Date.now() - new Date(t.created_at).getTime()
+  return ms >= 0 && ms < 24 * 60 * 60 * 1000
+}
 
 const messages = ref([])
 const draft = ref('')
@@ -461,6 +499,10 @@ async function onGoToRef(ref) {
 }
 
 onMounted(async () => {
+  let saved = null
+  try { saved = localStorage.getItem('squad.fontScale') } catch { /* 隐私模式下忽略 */ }
+  const savedIndex = FONT_SCALES.findIndex((f) => f.key === saved)
+  applyFontScale(savedIndex >= 0 ? savedIndex : 1, false)
   if (!store.projects.length) await store.load()
   await reloadAll()
 })
@@ -471,7 +513,7 @@ watch(() => store.currentId, () => { reloadAll() })
 <style scoped>
 /* 新工作台：一个界面、两个投影。设计规则见仓库 DECISIONS.md（D-001 / D-006） */
 .ws {
-  /* 令牌来自 theme.css 的设计令牌 v4：配色与字号只在一处定义 */
+  /* 一律引用 theme.css 的设计令牌 v5；组件里不写死颜色与字号 */
   --ws-bg: var(--p-surface);
   --ws-surface: var(--p-surface);
   --ws-surface2: var(--p-canvas);
@@ -479,16 +521,24 @@ watch(() => store.currentId, () => { reloadAll() })
   --ws-line2: var(--p-line-soft);
   --ws-fg: var(--p-ink);
   --ws-fg2: var(--p-ink-2);
-  --ws-fg3: var(--p-ink-3);
+  --ws-fg3: var(--p-ink-2);
+  --ws-idle: var(--p-idle);
   --ws-accent: var(--p-brand);
   --ws-accent-strong: var(--p-brand-strong);
   --ws-accent-wash: var(--p-brand-wash);
   --ws-accent-line: var(--p-brand-line);
-  --ws-warn: var(--p-warn);
-  --ws-warn-wash: var(--p-warn-wash);
-  --ws-warn-line: var(--p-warn-line);
-  --ws-radius: 8px;
-  --ws-radius-sm: 6px;
+  --ws-mint: var(--p-block-mint);
+  --ws-on-mint: var(--p-on-mint);
+  --ws-peach: var(--p-block-peach);
+  --ws-on-peach: var(--p-on-peach);
+  --ws-sand: var(--p-block-sand);
+  --ws-on-sand: var(--p-on-sand);
+  --ws-rose: var(--p-block-rose);
+  --ws-on-rose: var(--p-on-rose);
+  --ws-plain: var(--p-block-plain);
+  --ws-danger: var(--p-danger);
+  --ws-radius: var(--p-r-sm);
+  --ws-radius-sm: var(--p-r-sm);
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -496,6 +546,12 @@ watch(() => store.currentId, () => { reloadAll() })
   color: var(--ws-fg);
   font-size: var(--p-fs-ui);
   line-height: var(--p-lh-ui);
+}
+
+/* 键盘可达：焦点一律用主色描边，不靠加深底色 */
+.ws :is(button, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--ws-accent);
+  outline-offset: 2px;
 }
 
 /* ---------- 顶栏 ---------- */
@@ -520,6 +576,8 @@ watch(() => store.currentId, () => { reloadAll() })
 .ws-brandtext b { font-weight: 600; font-size: var(--p-fs-title); letter-spacing: 0.01em; }
 .ws-brandtext i { font-style: normal; font-size: var(--p-fs-eyebrow); letter-spacing: 1.6px; color: var(--ws-fg3); }
 .ws-scopes, .ws-panels { display: flex; gap: 4px; }
+.ws-fontbtn { font-variant-numeric: tabular-nums; }
+.ws-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .ws-chip {
   font: inherit;
   font-size: var(--p-fs-meta);
@@ -574,7 +632,7 @@ watch(() => store.currentId, () => { reloadAll() })
 }
 .ws-file:hover { background: var(--ws-surface); }
 .ws-file.on { background: var(--ws-surface); border-color: var(--ws-line); }
-.ws-mark { width: 8px; height: 8px; border-radius: 2px; background: var(--ws-accent-wash); border: 1px solid var(--ws-accent-line); flex-shrink: 0; }
+.ws-mark { width: 8px; height: 8px; border-radius: 50%; background: var(--ws-accent-wash); border: 1px solid var(--ws-accent-line); flex-shrink: 0; }
 .ws-filename { flex: 1; min-width: 0; font-size: var(--p-fs-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ws-filenote { font-size: var(--p-fs-tag); color: var(--ws-fg3); white-space: nowrap; }
 .ws-preview { margin-top: 14px; padding: 10px 11px; border: 1px solid var(--ws-line); border-radius: var(--ws-radius); background: var(--ws-surface); }
@@ -630,11 +688,19 @@ watch(() => store.currentId, () => { reloadAll() })
 .ws-livetitle b { font-weight: 600; font-size: var(--p-fs-title); }
 .ws-livetitle span { font-size: var(--p-fs-meta); color: var(--ws-fg3); }
 .ws-liveacts { display: flex; align-items: center; gap: 6px; }
-.ws-sync {
-  font-size: var(--p-fs-tag); color: var(--ws-accent);
-  border: 1px solid var(--ws-accent-line); background: var(--ws-accent-wash);
-  border-radius: 999px; padding: 2px 9px; white-space: nowrap;
+.ws-follow { display: inline-flex; align-items: center; gap: 6px; font-size: var(--p-fs-tag); color: var(--ws-fg2); white-space: nowrap; }
+.ws-followdot { width: 6px; height: 6px; border-radius: 50%; background: var(--ws-accent); }
+.ws-btn {
+  font: inherit;
+  font-size: var(--p-fs-tag);
+  color: var(--ws-fg2);
+  background: var(--ws-surface);
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-radius-sm);
+  padding: 3px 10px;
+  cursor: pointer;
 }
+.ws-btn:hover { color: var(--ws-fg); border-color: var(--ws-idle); }
 .ws-filters { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 10px; }
 .ws-filters .ws-chip { font-size: var(--p-fs-tag); padding: 3px 10px; }
 .ws-preview-list { display: flex; flex-direction: column; }
@@ -645,16 +711,16 @@ watch(() => store.currentId, () => { reloadAll() })
   background: transparent; color: var(--ws-fg); cursor: pointer;
 }
 .ws-row:first-child { border-top: 0; }
-.ws-row:hover { background: var(--ws-surface); }
+.ws-row:hover { background: var(--ws-plain); }
 .ws-rowmain { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .ws-rowtitle { font-size: var(--p-fs-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ws-rowwarn { font-size: var(--p-fs-tag); color: var(--ws-warn); }
+.ws-rowwarn { font-size: var(--p-fs-tag); color: var(--ws-on-peach); }
 .ws-rowmeta { font-size: var(--p-fs-tag); color: var(--ws-fg3); }
 .ws-arrow { color: var(--ws-fg3); }
 .ws-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--p-idle); flex-shrink: 0; }
 .ws-dot.doing { background: var(--ws-accent); }
 .ws-dot.done { background: var(--p-ok); }
-.ws-dot.lock { background: var(--ws-warn); }
+.ws-dot.lock { background: var(--ws-on-peach); }
 .ws-pava {
   width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
@@ -662,6 +728,14 @@ watch(() => store.currentId, () => { reloadAll() })
   background: var(--ws-accent-wash); border: 1px solid var(--ws-accent-line);
 }
 .ws-pava.empty { background: transparent; border: 1px dashed var(--ws-line); color: var(--ws-fg3); }
+.ws-fresh {
+  font-size: var(--p-fs-eyebrow);
+  color: var(--ws-on-rose);
+  background: var(--ws-rose);
+  border-radius: var(--p-r-xs);
+  padding: 1px 6px;
+  white-space: nowrap;
+}
 .ws-more, .ws-hint, .ws-empty-small { font-size: var(--p-fs-meta); color: var(--ws-fg3); padding-top: 8px; }
 
 /* 全屏看板 */
@@ -673,21 +747,25 @@ watch(() => store.currentId, () => { reloadAll() })
   border-radius: var(--ws-radius); background: var(--ws-surface);
   min-height: 200px;
 }
-.ws-colhead { display: flex; align-items: center; gap: 6px; font-size: var(--p-fs-meta); color: var(--ws-fg2); }
-.ws-colhead b { margin-left: auto; font-weight: 600; color: var(--ws-fg3); }
+.ws-colhead {
+  display: flex; align-items: center; gap: 6px;
+  font-size: var(--p-fs-meta); color: var(--ws-fg2);
+  padding: 5px 8px; border-radius: var(--ws-radius-sm);
+}
+.ws-colhead b { margin-left: auto; font-weight: 600; color: var(--ws-fg3); font-variant-numeric: tabular-nums; }
+.ws-col-doing > .ws-colhead { background: var(--ws-mint); color: var(--ws-on-mint); }
+.ws-col-doing > .ws-colhead b { color: var(--ws-on-mint); }
+.ws-col-done > .ws-colhead { background: var(--ws-sand); color: var(--ws-on-sand); }
+.ws-col-done > .ws-colhead b { color: var(--ws-on-sand); }
 .ws-card { padding: 9px 10px; border: 1px solid var(--ws-line2); border-radius: var(--ws-radius-sm); background: var(--ws-surface); }
-.ws-card.locked { background: var(--ws-warn-wash); border-color: var(--ws-warn-line); }
+.ws-card.locked { background: var(--ws-peach); border-color: var(--ws-peach); }
 .ws-card h4 { margin: 6px 0 7px; font-size: var(--p-fs-ui); font-weight: 500; line-height: var(--p-lh-tight); }
-.ws-cardnote { font-size: var(--p-fs-tag); color: var(--ws-warn); margin-bottom: 7px; }
+.ws-cardnote { font-size: var(--p-fs-tag); color: var(--ws-on-peach); margin-bottom: 7px; }
 .ws-cardfoot { display: flex; align-items: center; gap: 6px; }
 .ws-who { font-size: var(--p-fs-tag); color: var(--ws-fg3); }
-.ws-pri {
-  display: inline-block; font-size: 11.5px; padding: 1px 7px;
-  border-radius: 999px; border: 1px solid var(--ws-line);
-  color: var(--ws-fg2); background: var(--ws-surface2);
-}
-.ws-pri.high { color: var(--p-danger); border-color: var(--p-danger-line); background: var(--p-danger-wash); }
-.ws-pri.medium { color: var(--p-warn); border-color: var(--p-warn-line); background: var(--p-warn-wash); }
+.ws-pri { display: inline-block; font-size: var(--p-fs-eyebrow); letter-spacing: 0.04em; color: var(--ws-fg2); }
+.ws-pri.high { color: var(--ws-danger); font-weight: 600; }
+.ws-pri.medium, .ws-pri.low { color: var(--ws-fg2); }
 
 /* 我的任务 */
 .ws-mygroup { margin-bottom: 12px; }

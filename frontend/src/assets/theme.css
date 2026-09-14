@@ -227,57 +227,72 @@ body {
 }
 
 /* ==========================================================================
- * 设计令牌 v4（2026-09-14）：字号层级 + 配色层级
+ * 设计令牌 v5（2026-09-14）：notion-pre-ai 暖中性 + 四色软色块 + 可缩放字号
  *
- * 配色规则（就三条，别破例）：
- * 1. 全站只有一个饱和色 --p-brand，只出现在「能点的东西」上：
- *    发送、激活的范围/筛选、品牌标记、进行中。
- * 2. 需要人关注或动手的用 --p-warn（待解锁、被卡住）；它不参与装饰。
- * 3. 其余一律中性灰阶；关键数字用 --p-ink（近黑）+ 等宽数字，让眼睛先看到数。
+ * 用色规则（取代 v4）：
+ * 1. 全站只有一个饱和色 --p-brand（石青），只出现在「可点 / 激活 / 进行中」。
+ * 2. 只有「底」带色：画布、看板列头、待解锁提示、新变化标记；
+ *    状态一律只用 8px 小圆点，不刷亮字。
+ * 3. 其余全走暖中性灰阶；关键数字用 --p-ink + 等宽数字。
  *
- * 字号层级：display(22) > title(15) > body(14.5) > ui(13.5) > meta(12.5) > tag(12) > eyebrow(11)
- * 用法：新页面直接用 --p-*；--el-* 继续保留给旧页面，不动。
+ * 圆角语法：4 徽标/代码 · 8 卡片/列/按钮/输入 · 16 面板/气泡/弹层
+ *          999 只给「可切换 / 可筛选」· 50% 头像与状态点
+ *
+ * 字号：全部用 rem 定义，跟着 html 的 font-size 整体缩放（三档 93.75% / 100% / 112.5%）。
  * ========================================================================== */
 :root {
-  /* 画布与面 */
-  --p-canvas: #f4f6f6;
+  /* 面 */
+  --p-canvas: #f7f6f3;
   --p-surface: #ffffff;
-  --p-line: #e3e8e8;
-  --p-line-soft: #eef2f2;
+  --p-line: #e9e9e7;
+  --p-line-soft: #f1f0ed;
 
-  /* 文字 */
-  --p-ink: #101619;
-  --p-ink-2: #46525a;
-  --p-ink-3: #627078;   /* 标注/元信息：在画布上 4.71，白底 5.11，过 AA */
+  /* 字 */
+  --p-ink: #37352f;
+  --p-ink-2: #6b6a66;
+  --p-idle: #838d94;
 
-  /* 主色：只给能点的东西 */
+  /* 主色：只给可点 / 激活 / 进行中 */
   --p-brand: #0f766e;
   --p-brand-strong: #0b5f58;
-  --p-brand-wash: #e6f3f1;
-  --p-brand-line: #b4d9d3;
+  --p-brand-wash: #e4f4f1;
+  --p-brand-line: #b9dcd5;
 
-  /* 需要你关注 / 动手 */
-  --p-warn: #b45309;
-  --p-warn-wash: #fbf2e4;
-  --p-warn-line: #ebd7b7;
+  /* 四色软色块：只做底；配套字色都已算过对比度（>= 4.5） */
+  --p-block-mint: #e4f4f1;
+  --p-on-mint: #0b5f58;
+  --p-block-peach: #ffedd5;
+  --p-on-peach: #92400e;
+  --p-block-sand: #fef3c7;
+  --p-on-sand: #7a5b12;
+  --p-block-rose: #fce7f3;
+  --p-on-rose: #9d174d;
+  --p-block-plain: #f1f0ed;
 
-  /* 状态 */
+  /* 状态点与文字 */
   --p-ok: #15794a;
-  --p-ok-wash: #e8f4ee;
   --p-danger: #b42318;
-  --p-danger-wash: #fdf2f1;
-  --p-danger-line: #f0cfcb;
-  --p-idle: #838d94;    /* 未开始的状态点：白底 3.39，过非文本 3:1 */
 
-  /* 字号层级 */
-  --p-fs-display: 22px;
-  --p-fs-title: 15px;
-  --p-fs-body: 14.5px;
-  --p-fs-ui: 13.5px;
-  --p-fs-meta: 12.5px;
-  --p-fs-tag: 12px;
-  --p-fs-eyebrow: 11px;
+  /* 圆角语法 */
+  --p-r-xs: 4px;
+  --p-r-sm: 8px;
+  --p-r-lg: 16px;
+  --p-r-pill: 999px;
+
+  /* 字号层级（rem） */
+  --p-fs-display: 1.375rem;
+  --p-fs-title: 0.9375rem;
+  --p-fs-body: 0.90625rem;
+  --p-fs-ui: 0.84375rem;
+  --p-fs-meta: 0.78125rem;
+  --p-fs-tag: 0.75rem;
+  --p-fs-eyebrow: 0.6875rem;
   --p-lh-tight: 1.35;
   --p-lh-ui: 1.5;
   --p-lh-read: 1.75;
+
+  /* Element Plus 组件跟着档位走 */
+  --el-font-size-small: 0.78125rem;
+  --el-font-size-base: 0.84375rem;
+  --el-font-size-large: 0.90625rem;
 }
