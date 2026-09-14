@@ -1,118 +1,112 @@
 /* ==========================================================================
- * Squad · 小队智脑 —— 设计系统 v2（Linear 化：克制、精确、单一强调色）
- * 风格锚点: web-design-engineer / style-recipes/linear.md（浅色演绎版）
- * 原则:
- *   - 单一强调色（靛蓝 #4f46e5 ≈ Linear purple 的品牌本地版），其余皆中性灰
- *   - 发丝 1px 分隔线代替大阴影；卡片阴影"barely there"
- *   - 圆角克制: 控件 6 / 卡片 12，永不 gummy
- *   - 动效 150ms ease-out，snappy 不弹跳
- * 实现: 覆盖 Element Plus CSS 变量 => 全站组件立即生效，无需逐个改 EP 组件
+ * Squad · 小队智脑 —— 设计系统 v3（明亮专业 · 清晰高效 / 暖纸中性 + 深松石青）
+ * 定位: 面向 2–6 人小队的 AI 项目协管。首页即「工作台/助手」，结构化视图是展开面板。
+ * 气质: light-first · 高信息层级 · 单一自信强调色 · 控件利落 · 文案白话。
+ * 实现: 覆盖 Element Plus CSS 变量 + 少量 .squad 私有变量 => 全站 EP 组件统一生效。
  * ========================================================================== */
+
 :root {
-  /* ---------- 品牌主色（唯一强调色） ---------- */
-  --el-color-primary: #4f46e5;
-  --el-color-primary-dark-2: #4338ca;
-  --el-color-primary-light-3: #7c74ee;
-  --el-color-primary-light-5: #a5a0f4;
-  --el-color-primary-light-7: #c9c6f9;
-  --el-color-primary-light-8: #dcdafb;
-  --el-color-primary-light-9: #efeffd;
+  /* ================= 强调色 =================
+   * 深松石青 petrol-teal（替代旧靛蓝 #4f46e5）。与语义四色拉得开：绿=完成、青=操作。
+   * 若 v0 观感仍嫌与「完成」绿接近，可整体替换为深海蓝系（见计划 fallback）。 */
+  --el-color-primary: #0f766e;
+  --el-color-primary-dark-2: #0c5b55;      /* hover / 按下 */
+  --el-color-primary-light-3: #57a09a;
+  --el-color-primary-light-5: #8abfbb;
+  --el-color-primary-light-7: #b7d8d5;
+  --el-color-primary-light-8: #cfe6e3;
+  --el-color-primary-light-9: #e8f3f1;
 
-  --squad-brand: #4f46e5;
-  --squad-brand-deep: #312e81;
-  --squad-brand-grad: linear-gradient(135deg, #6366f1 0%, #4f46e5 55%, #312e81 100%);
-  --squad-sidebar-bg: #14121f;      /* 深色侧栏：warm near-black，Linear 底色口吻 */
-  --squad-sidebar-bg-2: #1e1b2e;
-  --squad-sidebar-text: rgba(255, 255, 255, 0.66);
-  --squad-sidebar-text-active: #ffffff;
-  --squad-sidebar-hairline: rgba(255, 255, 255, 0.06);
+  --squad-brand: #0f766e;
+  --squad-brand-deep: #0b4a45;
+  --squad-brand-wash: #e8f3f1;
 
-  /* ---------- 状态色：收敛为语义四色（success 统一为单一绿色系） ---------- */
-  --el-color-success: #22c55e;
-  --el-color-success-dark-2: #16a34a;
-  --el-color-success-light-3: #4ade80;
-  --el-color-success-light-5: #86efac;
-  --el-color-success-light-7: #bbf7d0;
-  --el-color-success-light-8: #d1fae5;
-  --el-color-success-light-9: #ecfdf5;
+  /* ================= 语义色（与强调青区分） ================= */
+  --el-color-success: #16a34a;             /* 完成 · 绿 */
+  --el-color-success-dark-2: #15803d;
+  --el-color-success-light-3: #5bbb7e;
+  --el-color-success-light-5: #8ecfa6;
+  --el-color-success-light-7: #bde3cc;
+  --el-color-success-light-8: #d4ecdd;
+  --el-color-success-light-9: #eaf6ee;
 
-  --el-color-warning: #e6a23c;
-  --el-color-warning-dark-2: #b88230;
-  --el-color-warning-light-3: #eebe77;
-  --el-color-warning-light-5: #f3d19e;
-  --el-color-warning-light-7: #f8e3c5;
-  --el-color-warning-light-8: #faecd8;
-  --el-color-warning-light-9: #fdf6ec;
+  --el-color-warning: #d97706;             /* 阻塞 · 琥珀 */
+  --el-color-warning-dark-2: #b45309;
+  --el-color-warning-light-3: #e6a355;
+  --el-color-warning-light-5: #eec38a;
+  --el-color-warning-light-7: #f6ddbb;
+  --el-color-warning-light-8: #f9e9d4;
+  --el-color-warning-light-9: #fdf4e6;
 
-  --el-color-danger: #ef4444;
-  --el-color-danger-dark-2: #dc2626;
-  --el-color-danger-light-3: #f87171;
-  --el-color-danger-light-5: #fca5a5;
-  --el-color-danger-light-7: #fecaca;
-  --el-color-danger-light-8: #fee2e2;
-  --el-color-danger-light-9: #fef2f2;
+  --el-color-danger: #dc2626;
+  --el-color-danger-dark-2: #b91c1c;
+  --el-color-danger-light-3: #e87070;
+  --el-color-danger-light-5: #ef9e9e;
+  --el-color-danger-light-7: #f6c6c6;
+  --el-color-danger-light-8: #f9dada;
+  --el-color-danger-light-9: #fdeded;
 
-  --el-color-error: #ef4444;
-  --el-color-error-dark-2: #dc2626;
-  --el-color-error-light-3: #f87171;
-  --el-color-error-light-5: #fca5a5;
-  --el-color-error-light-7: #fecaca;
-  --el-color-error-light-8: #fee2e2;
-  --el-color-error-light-9: #fef2f2;
+  --el-color-error: #dc2626;
+  --el-color-error-dark-2: #b91c1c;
+  --el-color-error-light-3: #e87070;
+  --el-color-error-light-5: #ef9e9e;
+  --el-color-error-light-7: #f6c6c6;
+  --el-color-error-light-8: #f9dada;
+  --el-color-error-light-9: #fdeded;
 
-  --el-color-info: #6b7280;
-  --el-color-info-dark-2: #4b5563;
-  --el-color-info-light-3: #9ca3af;
-  --el-color-info-light-5: #c8cdd5;
-  --el-color-info-light-7: #e2e5ea;
-  --el-color-info-light-8: #eceef2;
-  --el-color-info-light-9: #f6f7f9;
+  --el-color-info: #64748b;
+  --el-color-info-dark-2: #475569;
+  --el-color-info-light-3: #94a3b8;
+  --el-color-info-light-5: #b6c2d1;
+  --el-color-info-light-7: #d7dee7;
+  --el-color-info-light-8: #e4e9f0;
+  --el-color-info-light-9: #f3f5f8;
 
-  /* ---------- 中性层：灰阶单一来源（组件全部改走这些 var） ---------- */
-  --el-text-color-primary: #1f2329;
-  --el-text-color-regular: #4b5563;
-  --el-text-color-secondary: #6b7280;
-  --el-text-color-placeholder: #9ca3af;
-  --el-text-color-disabled: #c8cdd5;
+  /* ================= 中性层：暖灰纸张 ================= */
+  --el-text-color-primary: #23272c;
+  --el-text-color-regular: #4b5157;
+  --el-text-color-secondary: #6d747b;
+  --el-text-color-placeholder: #9aa0a8;
+  --el-text-color-disabled: #c3c8cd;
 
-  --el-border-color: #dcdfe6;          /* 主分隔线 */
-  --el-border-color-light: #e5e7eb;    /* 发丝分隔（最常用） */
-  --el-border-color-lighter: #eceef1;
-  --el-border-color-extra-light: #f3f4f6;
-  --el-border-color-dark: #c8cdd5;
-  --el-border-color-darker: #a8adb8;
+  --el-border-color: #d8d5cf;              /* 较重分隔 */
+  --el-border-color-light: #e4e1db;        /* 发丝分隔（最常用，暖灰） */
+  --el-border-color-lighter: #ece9e3;
+  --el-border-color-extra-light: #f3f1ec;
+  --el-border-color-dark: #c6c2ba;
+  --el-border-color-darker: #a8a49c;
 
-  --el-fill-color: #f3f4f6;
-  --el-fill-color-light: #f6f7f8;
-  --el-fill-color-lighter: #fafbfc;
-  --el-fill-color-extra-light: #fcfcfd;
-  --el-fill-color-dark: #e8eaed;
-  --el-fill-color-darker: #dcdfe3;
+  --el-fill-color: #f1f0ec;                /* 悬浮 / 次级底 */
+  --el-fill-color-light: #f5f4f0;
+  --el-fill-color-lighter: #f9f8f6;
+  --el-fill-color-extra-light: #fcfcfb;
+  --el-fill-color-dark: #e8e6e0;
+  --el-fill-color-darker: #dcd9d2;
 
   --el-bg-color: #ffffff;
-  --el-bg-color-page: #f7f8fa;         /* 内容区底：比纯白低一档，衬托白色卡片 */
+  --el-bg-color-page: #f6f5f2;             /* 暖纸底，衬托白卡 */
   --el-bg-color-overlay: #ffffff;
 
-  /* ---------- 圆角：控件 6 / 卡片 12（永不超过 16） ---------- */
-  --el-border-radius-small: 4px;
-  --el-border-radius-base: 6px;        /* 按钮/输入/下拉等控件 */
+  /* ================= 圆角：控件 8 / 卡片 14 / 弹层 16 ================= */
+  --el-border-radius-small: 6px;
+  --el-border-radius-base: 8px;
   --el-border-radius-round: 999px;
-  --squad-radius-card: 12px;
-  --squad-radius-control: 6px;
+  --squad-radius-card: 14px;
+  --squad-radius-lg: 16px;
 
-  /* ---------- 阴影：barely there（拒绝彩色/大阴影） ---------- */
-  --el-box-shadow: 0 2px 10px rgba(17, 24, 39, 0.06);
-  --el-box-shadow-light: 0 1px 3px rgba(17, 24, 39, 0.05);
-  --el-box-shadow-lighter: 0 1px 2px rgba(17, 24, 39, 0.03);
-  --el-box-shadow-dark: 0 4px 16px rgba(17, 24, 39, 0.12);
-  --squad-shadow-hover: 0 2px 6px rgba(17, 24, 39, 0.07), 0 0 0 1px rgba(79, 70, 229, 0.06);
+  /* ================= 阴影：发丝 + 极浅 2 级，不花哨 ================= */
+  --el-box-shadow-light: 0 1px 2px rgba(26, 29, 33, 0.04);
+  --el-box-shadow: 0 2px 10px -2px rgba(26, 29, 33, 0.06), 0 1px 2px rgba(26, 29, 33, 0.04);
+  --el-box-shadow-lighter: 0 1px 2px rgba(26, 29, 33, 0.03);
+  --el-box-shadow-dark: 0 16px 40px -12px rgba(20, 22, 26, 0.22), 0 2px 8px rgba(20, 22, 26, 0.05);
+  --squad-shadow-hover: 0 3px 10px -2px rgba(15, 118, 110, 0.14), 0 0 0 1px rgba(15, 118, 110, 0.08);
 
-  /* ---------- 动效：150ms ease-out，snappy 不弹跳 ---------- */
-  --el-transition-duration: 0.2s;
+  /* ================= 动效：180ms ease-out，snappy ================= */
+  --el-transition-duration: 0.18s;
   --el-transition-duration-fast: 0.12s;
   --squad-ease: cubic-bezier(0.22, 1, 0.36, 1);
 
-  /* ---------- 字阶（本项目自有类统一引用） ---------- */
+  /* ================= 字阶（本项目自定义组件统一引用） ================= */
   --squad-fs-caption: 12px;
   --squad-fs-body: 14px;
   --squad-fs-title: 15px;
@@ -121,40 +115,113 @@
   --squad-fs-display: 26px;
 }
 
-/* ---------- 全局动效基调 ---------- */
+/* ---------- 字体与基础 ---------- */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  background: var(--el-bg-color-page);
+  color: var(--el-text-color-primary);
+}
+#app, html, body { height: 100%; }
 * { transition-timing-function: var(--squad-ease); }
+/* 数字/百分比等宽，避免跳变 */
+.tnum, .el-table, .el-badge__content, [class*='col-count'], [class*='pct'] {
+  font-variant-numeric: tabular-nums;
+}
 
-/* ---------- 弹层/卡片归一：发丝线 + 白底 + 克制圆角 ---------- */
+/* ---------- 卡片归一：白底 + 发丝线，hover 才给轻提影 ---------- */
 .el-card {
   border-radius: var(--squad-radius-card);
   border: 1px solid var(--el-border-color-light);
-  box-shadow: none !important;                 /* 分隔靠 hairline，不靠阴影 */
-  transition: box-shadow 0.15s var(--squad-ease), transform 0.15s var(--squad-ease);
+  box-shadow: none !important;
+  background: var(--el-bg-color);
+  color: var(--el-text-color-primary);
+  transition: box-shadow 0.18s var(--squad-ease), border-color 0.18s var(--squad-ease),
+              transform 0.18s var(--squad-ease);
 }
 .el-card.is-hover-shadow:hover {
-  box-shadow: var(--squad-shadow-hover) !important;
+  box-shadow: var(--el-box-shadow-light) !important;
 }
 
-/* 弹层（下拉/弹窗）柔化 */
-.el-popper, .el-dialog {
-  box-shadow: var(--el-box-shadow-light);
-}
-.el-dialog {
-  border-radius: var(--squad-radius-card);
+/* ---------- 弹层/对话框：白底 + 克制圆角 ---------- */
+.el-popper, .el-dialog, .el-message-box, .el-dropdown-menu {
+  border-radius: var(--squad-radius-lg);
+  box-shadow: var(--el-box-shadow-dark);
   border: 1px solid var(--el-border-color-light);
 }
+.el-dialog {
+  border-radius: var(--squad-radius-lg);
+}
+.el-dialog__title { font-weight: 700; color: var(--el-text-color-primary); }
+.el-dialog__header { padding: 18px 20px 0; }
+.el-dialog__body { padding: 18px 20px; color: var(--el-text-color-regular); }
+.el-dialog__footer { padding: 0 20px 18px; }
 
-/* ---------- 表单控件 hover/focus 反馈（snappy） ---------- */
-.el-input__wrapper, .el-textarea__inner {
-  transition: box-shadow 0.15s var(--squad-ease), border-color 0.15s var(--squad-ease);
+/* ---------- 表单控件：hover/focus 反馈（snappy，focus 用强调色描边） ---------- */
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper {
+  border-radius: var(--el-border-radius-base);
+  box-shadow: 0 0 0 1px var(--el-border-color) inset !important;
+  transition: box-shadow 0.15s var(--squad-ease);
 }
-.el-button {
-  font-weight: 500;
-  transition: all 0.15s var(--squad-ease);
+.el-input__wrapper:hover,
+.el-select__wrapper:hover { box-shadow: 0 0 0 1px var(--el-border-color-dark) inset !important; }
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused,
+.el-textarea__inner:focus {
+  box-shadow: 0 0 0 1.5px var(--el-color-primary) inset !important;
 }
+.el-textarea__inner {
+  transition: box-shadow 0.15s var(--squad-ease);
+}
+
+/* ---------- 按钮 ---------- */
+.el-button { font-weight: 500; border-radius: var(--el-border-radius-base); }
+.el-button--primary {
+  --el-button-bg-color: var(--el-color-primary);
+  --el-button-border-color: var(--el-color-primary);
+  --el-button-hover-bg-color: var(--el-color-primary-dark-2);
+  --el-button-hover-border-color: var(--el-color-primary-dark-2);
+}
+.el-button--primary.is-plain {
+  --el-button-bg-color: var(--el-color-primary-light-9);
+  --el-button-border-color: var(--el-color-primary-light-7);
+  --el-button-text-color: var(--el-color-primary);
+  --el-button-hover-text-color: #fff;
+  --el-button-hover-bg-color: var(--el-color-primary);
+  --el-button-hover-border-color: var(--el-color-primary);
+}
+
+/* ---------- 标签 Tag ---------- */
+.el-tag { border-radius: 6px; font-weight: 500; }
+.el-tag--light.el-tag--success { background: var(--el-color-success-light-9); color: var(--el-color-success-dark-2); border-color: var(--el-color-success-light-7); }
+.el-tag--light.el-tag--warning { background: var(--el-color-warning-light-9); color: var(--el-color-warning-dark-2); border-color: var(--el-color-warning-light-7); }
+.el-tag--light.el-tag--danger { background: var(--el-color-danger-light-9); color: var(--el-color-danger-dark-2); border-color: var(--el-color-danger-light-7); }
+.el-tag--plain { background: var(--el-bg-color); }
+
+/* ---------- 消息提示 ---------- */
+.el-message { border-radius: 10px; box-shadow: var(--el-box-shadow-dark); border: 1px solid var(--el-border-color-light); }
+
+/* ---------- 表格（记忆库用） ---------- */
+.el-table { --el-table-border-color: var(--el-border-color-lighter); --el-table-header-bg-color: var(--el-fill-color-lighter); }
+.el-table th.el-table__cell { font-weight: 600; color: var(--el-text-color-regular); }
+.el-table__expanded-cell { padding: 12px 16px; }
+
+/* ---------- 分割线 / 占位 ---------- */
+.el-divider--horizontal { border-top: 1px solid var(--el-border-color-lighter); }
+.el-empty__description p { color: var(--el-text-color-placeholder); }
 
 /* ---------- 细滚动条 ---------- */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.16); border-radius: 6px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.28); }
+::-webkit-scrollbar-thumb { background: rgba(35, 39, 44, 0.16); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(35, 39, 44, 0.28); }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- 轻抬移动效关键帧（页面/面板进入） ---------- */
+@keyframes squad-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}

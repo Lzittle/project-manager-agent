@@ -1,11 +1,14 @@
-// 项目全局状态：项目列表 + 当前选中项目（仪表盘/看板/知识库共用）
+// 项目全局状态：项目列表 + 当前选中项目（工作台对话/看板/记忆/总览共用）
+// 约定：NO_PROJECT(0) 表示「全局 · 不绑定项目」——对话可建任意项目、看板/记忆给出先选项目引导。
 import { defineStore } from 'pinia'
 import { projectApi } from '../api'
+
+export const NO_PROJECT = 0
 
 export const useProjectStore = defineStore('project', {
   state: () => ({
     projects: [],
-    currentId: null,
+    currentId: NO_PROJECT,
     loading: false,
   }),
   getters: {
@@ -33,7 +36,7 @@ export const useProjectStore = defineStore('project', {
       roots.forEach((r) => walk(r, 1))
       return rows
     },
-    // 当前项目所在层级（面包屑用）：根=1
+    // 当前项目所在层级（面包屑用）：根=1；全局时 =1
     currentDepth: (s) => {
       const node = s.treeRows.find((r) => r.id === s.currentId)
       return node ? node.depth : 1
@@ -44,16 +47,20 @@ export const useProjectStore = defineStore('project', {
       this.loading = true
       try {
         this.projects = await projectApi.list()
-        if (!this.currentId && this.projects.length) {
-          this.currentId = this.projects[0].id
-        }
+        // 默认停在「全局」；仅当当前选中的项目已被删除时才退回全局，绝不悄悄替你绑定某个项目
+        const stillValid =
+          this.currentId !== null &&
+          this.currentId !== undefined &&
+          this.currentId !== NO_PROJECT &&
+          this.projects.some((p) => p.id === this.currentId)
+        if (!stillValid) this.currentId = NO_PROJECT
       } finally {
         this.loading = false
       }
       return this.projects
     },
     setCurrent(id) {
-      this.currentId = id
+      this.currentId = id ?? NO_PROJECT
     },
     async create(name, description, parentId = null) {
       await projectApi.create({ name, description, parent_id: parentId ?? null })
@@ -62,7 +69,7 @@ export const useProjectStore = defineStore('project', {
     },
     async remove(id) {
       await projectApi.remove(id)
-      if (this.currentId === id) this.currentId = null
+      if (this.currentId === id) this.currentId = NO_PROJECT
       await this.load()
     },
   },

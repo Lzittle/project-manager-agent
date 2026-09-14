@@ -1,54 +1,55 @@
 <template>
-  <el-container class="layout">
-    <Sidebar />
-
-    <el-container class="right">
-      <el-header class="header">
-        <div class="header-title">
-          {{ $route.meta.title || 'Squad' }}
-          <span v-if="$route.meta.title" class="header-crumb">/ Squad · 小队智脑</span>
-        </div>
-        <div class="header-right">
-          <el-tag type="primary" effect="plain" round>
-            <el-icon style="vertical-align: -2px; margin-right: 4px"><User /></el-icon>
-            alice (演示用户)
-          </el-tag>
-        </div>
-      </el-header>
-      <el-main class="main">
-        <router-view />
-      </el-main>
-    </el-container>
-  </el-container>
+  <div class="app">
+    <TopBar v-if="route.name !== 'workspace'" />
+    <main class="app-main" :class="{ 'app-main-flush': route.name === 'workspace' }">
+      <div class="page" :class="'w-' + (route.name || 'home')">
+        <router-view v-slot="{ Component }">
+          <transition name="panel" mode="out-in">
+            <component :is="Component" :key="route.path" />
+          </transition>
+        </router-view>
+      </div>
+    </main>
+  </div>
 </template>
 
 <script setup>
-import { User } from '@element-plus/icons-vue'
-import Sidebar from './components/Sidebar.vue'
+import { useRoute } from 'vue-router'
+import TopBar from './components/TopBar.vue'
+
+const route = useRoute()
 </script>
 
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body, #app { height: 100%; }
-body { font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; }
 
-.layout { height: 100%; }
-.header {
-  background: var(--el-bg-color);
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 56px !important;
-  padding: 0 20px;
+.app { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+.app-main { flex: 1; overflow-y: auto; overflow-x: hidden; }
+/* 工作台 v2 自己管布局与滚动：顶栏与内边距都交给页面本身 */
+.app-main-flush { overflow: hidden; }
+
+/* 内容容器：路由名称决定宽度（对话窄栏更聚焦，数据视图放宽） */
+.page {
+  margin: 0 auto;
+  padding: 26px 28px 56px;
+  width: 100%;
+  animation: squad-rise 0.25s var(--squad-ease) both;
 }
-.header-title { font-size: 17px; font-weight: 700; color: var(--el-text-color-primary); }
-.header-crumb { font-size: 12px; font-weight: 400; color: var(--el-text-color-placeholder); margin-left: 8px; }
-.main {
-  background: var(--el-bg-color-page);
-  padding: 18px 20px;
-  overflow-y: auto;
+.w-home { max-width: 940px; }
+.w-overview { max-width: 1180px; }
+.w-board { max-width: 1240px; }
+.w-knowledge { max-width: 1120px; }
+.w-chat { max-width: 940px; }
+.w-workspace { max-width: none; padding: 0; height: 100%; animation: none; }
+
+/* 面板级切页动效：轻抬 + 极淡滑动 */
+.panel-enter-active, .panel-leave-active { transition: opacity 0.16s ease, transform 0.16s var(--squad-ease); }
+.panel-enter-from { opacity: 0; transform: translateY(8px); }
+.panel-leave-to { opacity: 0; transform: translateY(-4px); }
+
+@media (max-width: 720px) {
+  .page { padding: 18px 14px 40px; }
 }
-/* 页面卡片统一呼吸感（其余 token 见 theme.css 全局 .el-card） */
-.el-card { border-radius: var(--squad-radius-card); }
 </style>
