@@ -110,9 +110,10 @@ _TASK_DEL_HINT = re.compile(
     r"(?:删|删除|移除|清理|划掉|去掉)\S{0,12}(?:任务|项目)|(?:任务|项目)\S{0,8}(?:删|删除|划掉|移除)")
 # 进度/状态查询（只读，不写数据）：命中则由代码层先注入真实任务数据再让模型作答
 _PROGRESS_HINT = re.compile(
-    r"进度|进展|怎么样了|还剩|还有哪些|任务列表|任务清单|看看任务|查看任务|任务情况|"
-    r"完成情况|完成多少|多少任务|进行到|当前状态|目前状态|做到哪|状态如何|状态分布|任务状态|"
-    r"有几条|有哪些任务")
+    r"进度|进展|怎么样了|怎么样|什么情况|什么状态|还剩|还有哪些|任务列表|任务清单|"
+    r"看看任务|查看任务|任务情况|完成情况|完成多少|多少任务|多少个任务|"
+    r"进行到|当前状态|目前状态|做到哪|状态如何|状态分布|任务状态|"
+    r"有几条|有几个|有哪几|有哪些任务|列出来|列出|doing|todo")
 # 出现写动作（加/删/改/规划/状态流转）时不算纯查询，交给对应写工具/写路由
 _WRITE_ACTION = re.compile(
     r"(?:加|建|创建|新增|添加|安排|补|删|删除|移除|清理|划掉|去掉|"
@@ -451,6 +452,9 @@ class _ToolExecutor:
                                 "status": p.status, "description": p.description},
                     "task_count": len(tasks),
                     "by_status": {k: len(v) for k, v in by_status.items()},
+                    # 任务明细（供只读问答直接点名作答，不必再让模型自己查一遍）
+                    "tasks": [self._task_brief(t) for t in tasks[:30]],
+                    "tasks_truncated": max(0, len(tasks) - 30),
                     "done_ratio": round(len(by_status["done"]) / len(tasks), 2) if tasks else 0.0,
                     "high_open": high_open[:10],
                     "blocked": blocked[:10],

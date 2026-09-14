@@ -24,6 +24,10 @@ router = APIRouter()
 
 HISTORY_LIMIT = 20  # 作为上下文带入 Agent 的最近消息条数
 
+# 快照注入用的中文标签（状态/优先级对模型和用户都更直观）
+_STATUS_CN = {"todo": "待办", "doing": "进行中", "done": "已完成"}
+_PRIORITY_CN = {"high": "高", "medium": "中", "low": "低"}
+
 # 资料/记忆类意图：绑定项目时由代码层自动 RAG 检索注入（项目长期记忆），
 # 无需模型自觉调用 search_knowledge —— 否则模型经常「不查就答」。
 _MATERIAL_HINT = re.compile(
@@ -55,6 +59,15 @@ def _format_snapshot_note(snap: dict) -> str:
         f"- 任务总数 {d.get('task_count',0)}：待办 {by.get('todo',0)} / "
         f"进行中 {by.get('doing',0)} / 已完成 {by.get('done',0)}",
     ]
+    tasks = d.get("tasks") or []
+    if tasks:
+        lines.append("- 任务明细（#id｜标题｜状态｜优先级；"
+                     "待办=todo、进行中=doing、已完成=done；高=high、中=medium、低=low）：")
+        for t in tasks:
+            lines.append(f"  · #{t['id']}｜{t['title']}｜{_STATUS_CN.get(t['status'], t['status'])}"
+                         f"｜{_PRIORITY_CN.get(t['priority'], t['priority'])}")
+        if d.get("tasks_truncated"):
+            lines.append(f"  · …另有 {d['tasks_truncated']} 个任务未列出，可用 list_tasks 查全量")
     high = d.get("high_open") or []
     if high:
         lines.append(f"- 未完成的高优先级任务：{'、'.join(high)}")

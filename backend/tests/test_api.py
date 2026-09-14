@@ -1077,3 +1077,48 @@ def test_chat_plan_repeat_reuses_batch(client, monkeypatch):
 
     tasks = client.get(f"/api/tasks?project_id={p['id']}").json()
     assert len(tasks) == 1  # 两次请求只落一批
+
+
+# ---------- 回归：查询类自然说法走只读数据注入 ----------
+
+def test_progress_query_covers_natural_phrasings():
+    """「什么情况/多少个任务/doing 有哪几个」等口语说法必须算只读进度查询。"""
+    from core.agent import is_progress_query
+
+    for msg in ("项目现在什么情况", "项目现在怎么样", "项目里现在有多少个任务",
+                "现在 doing 状态的有哪几个", "把高优先级的任务都列出来"):
+        assert is_progress_query(msg) is True, msg
+
+    # 含写动作的仍不算查询（走写工具）
+    assert is_progress_query("把任务B标记为完成") is False
+    # 「把这几个任务拆细一点」是改造任务，不是只读查询（曾被「几个任务」误伤）
+    assert is_progress_query("把这几个任务拆细一点") is False
+
+
+def test_chat_progress_query_injects_task_detail(client, monkeypatch):
+    """回归：只读查询注入的上下文要带真实任务明细（标题+状态），模型可直接点名作答。"""
+    from types import SimpleNamespace
+
+    seen = {}
+
+    def fake_chat(messages, tools=None, **kwargs):
+        for m in messages:
+            if m["role"] == "system" and "当前真实状态" in m["content"]:
+                seen["context"] = m["content"]
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+            content="进行中的是登录联调。", tool_calls=None))])
+
+    monkeypatch.setattr("core.llm.chat", fake_chat)
+    p = _new_project(client, "快照明细项目")
+    _new_task(client, p["id"], "登录联调", status="doing")
+    _new_task(client, p["id"], "支付对接", status="todo")
+
+    r = client.post("/api/chat/send",
+                    json={"message": "现在 doing 状态的有哪几个", "user_id": 1,
+                          "project_id": p["id"]})
+    assert r.status_code == 200
+    assert r.json()["trace"][0]["tool"] == "project_snapshot"  # 代码层先读真实数据
+    ctx = seen.get("context") or ""
+    assert "登录联调" in ctx and "进行中" in ctx   # 明细里能点名
+    assert "支付对接" in ctx and "待办" in ctx
+    assert "任务总数 2" in ctx

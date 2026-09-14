@@ -24,8 +24,8 @@
         "write": {"mode": "none"},
         "reply_contains_any": ["6", "六"]
       },
-      "known_gap": true,
-      "note": "正则只认「怎么样了/进度」，「什么情况」漏到模型且不注入数据"
+      "known_gap": false,
+      "note": "「什么情况」纳入只读查询路由：代码层先注入真实任务快照再作答"
     },
     {
       "id": "q02_progress_how",
@@ -166,8 +166,8 @@
         "write": {"mode": "none"},
         "reply_contains_any": ["6", "六"]
       },
-      "known_gap": true,
-      "note": "「有多少个任务」不含「多少任务」，正则漏"
+      "known_gap": false,
+      "note": "「多少个任务」纳入只读查询路由"
     },
     {
       "id": "q12_doing_list",
@@ -181,7 +181,8 @@
         "write": {"mode": "none"},
         "reply_contains_any": ["登录联调"]
       },
-      "known_gap": true
+      "known_gap": false,
+      "note": "「doing 有哪几个」纳入只读查询路由，快照明细里可点名作答"
     },
     {
       "id": "w01_add_one",
@@ -421,8 +422,8 @@
         "write": {"mode": "none"},
         "reply_contains_any": []
       },
-      "known_gap": true,
-      "note": "「生成…任务」正则把它误判成自动规划，会直接写库"
+      "known_gap": false,
+      "note": "「生成任务清单」不再命中规划意图，走只读查询并注入真实数据"
     },
     {
       "id": "g06_refine_existing",
