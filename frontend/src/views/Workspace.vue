@@ -132,7 +132,7 @@
           </div>
         </div>
 
-        <div v-if="scope === 'team'" class="ws-filters" role="group" aria-label="任务筛选">
+        <div v-if="scope === 'team' && store.currentId" class="ws-filters" role="group" aria-label="任务筛选">
           <button
             v-for="f in filters"
             :key="f.key"
@@ -157,8 +157,26 @@
 
         <!-- 全队：预览（默认）或看板（全屏） -->
         <template v-else>
-          <div v-if="!visibleTasks.length" class="ws-empty-small">
-            {{ store.currentId ? '这个项目还没有任务，跟左边说一句就会长出来。' : '先在顶部选一个项目，或者直接跟 Squad 说一句。' }}
+          <!-- 全局：各项目任务分布（队长视野），点一行进入那个项目 -->
+          <div v-if="!store.currentId">
+            <div class="ws-empty-small">还没绑定项目。下面是全队的任务分布，点一行进入那个项目。</div>
+            <button
+              v-for="p in overview"
+              :key="p.id"
+              class="ws-row"
+              type="button"
+              @click="store.setCurrent(p.id)"
+            >
+              <span class="ws-rowmain">
+                <span class="ws-rowtitle">{{ p.name }}</span>
+                <span class="ws-rowmeta">{{ p.total }} 条任务 · 进行中 {{ p.doing }}<template v-if="p.blocked"> · 待解锁 {{ p.blocked }}</template></span>
+              </span>
+              <span class="ws-arrow">›</span>
+            </button>
+            <div v-if="!overview.length" class="ws-empty-small">还没有项目。</div>
+          </div>
+          <div v-else-if="!visibleTasks.length" class="ws-empty-small">
+            这个项目还没有任务，跟左边说一句就会长出来。
           </div>
           <div v-else-if="!liveFull" class="ws-preview-list">
             <button
@@ -233,6 +251,7 @@ const tasks = ref([])
 const mineTasks = ref([])           // 我的任务（跨项目）
 const documents = ref([])
 const picked = ref(null)
+const overview = ref([])            // 全局范围：各项目任务概览（队长视野）
 const threadEl = ref(null)
 
 const repoDocs = [
@@ -305,6 +324,10 @@ const myGroups = computed(() => {
 })
 
 const liveSummary = computed(() => {
+  if (!store.currentId) {
+    const total = overview.value.reduce((n, p) => n + p.total, 0)
+    return overview.value.length ? `全队 ${overview.value.length} 个项目 · ${total} 条任务` : '还没有项目'
+  }
   if (scope.value === 'me') return `${mineTasks.value.length} 条 · 跨全部项目`
   if (!tasks.value.length) return store.currentId ? '还没有任务' : '未绑定项目'
   const done = tasks.value.filter((t) => t.status === 'done').length
@@ -354,10 +377,29 @@ async function loadMine() {
   } catch { mineTasks.value = [] }
 }
 
+// 全局范围：不选项目时，右侧给全队的任务分布，点一行进入那个项目
+async function loadOverview() {
+  if (!store.projects.length) { overview.value = []; return }
+  try {
+    const lists = await Promise.all(store.projects.map((p) => taskApi.list(p.id).catch(() => [])))
+    overview.value = store.projects.map((p, i) => {
+      const list = lists[i]
+      return {
+        id: p.id,
+        name: p.name,
+        total: list.length,
+        doing: list.filter((t) => t.status === 'doing').length,
+        blocked: list.filter((t) => t.status !== 'done' && (t.blocked_by_count || 0) > 0).length,
+      }
+    })
+  } catch { overview.value = [] }
+}
+
 async function reloadAll() {
   picked.value = null
   await Promise.all([loadThread(), loadTasks(), loadDocuments()])
   if (scope.value === 'me') await loadMine()
+  if (!store.currentId) await loadOverview()
 }
 
 async function setScope(next) {
@@ -603,6 +645,8 @@ watch(() => store.currentId, () => { reloadAll() })
 .ws-rowmain { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .ws-rowtitle { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ws-rowwarn { font-size: 11px; color: var(--ws-warn); }
+.ws-rowmeta { font-size: 11px; color: var(--ws-fg3); }
+.ws-arrow { color: var(--ws-fg3); }
 .ws-dot { width: 8px; height: 8px; border-radius: 50%; background: #9aa0a8; flex-shrink: 0; }
 .ws-dot.doing { background: var(--ws-accent); }
 .ws-dot.done { background: #0f7a3d; }
