@@ -21,6 +21,7 @@ cd backend
 ```
 
 报告（Markdown + JSON）默认写到系统临时目录 `squad_agent_eval/reports/`，不进仓库。
+重跑只会重建评测库与向量库，**历史报告会保留**，可直接做修复前后对照；用 `--workdir` 可另开一份环境。
 
 ## 判什么
 

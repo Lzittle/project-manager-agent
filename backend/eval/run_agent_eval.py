@@ -105,9 +105,18 @@ def resolve_backend_dir() -> Path:
 
 
 def bootstrap(workdir: Path, fresh: bool) -> Path:
-    if fresh and workdir.exists():
-        shutil.rmtree(workdir, ignore_errors=True)
+    """准备评测环境。
+
+    fresh=True 时只清「评测库 + 向量库」重建干净数据，**保留 reports/ 里的历史报告** ——
+    否则每次跑评测都会把上一轮的报告一起删掉，没法做修复前后对照与人工复核。
+    """
     workdir.mkdir(parents=True, exist_ok=True)
+    if fresh:
+        for stale in (workdir / "eval.db", workdir / "chroma"):
+            if stale.is_dir():
+                shutil.rmtree(stale, ignore_errors=True)
+            elif stale.exists():
+                stale.unlink(missing_ok=True)
     os.environ["DATABASE_URL"] = f"sqlite:///{(workdir / 'eval.db').as_posix()}"
     os.environ["CHROMA_PERSIST_DIR"] = str(workdir / "chroma")
     os.environ["CHROMA_COLLECTION"] = "eval_knowledge_docs"
@@ -568,7 +577,8 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=None, help="只跑前 N 条")
     parser.add_argument("--workdir", default=str(DEFAULT_WORKDIR), help="评测库/向量库目录")
     parser.add_argument("--out", default=None, help="报告输出目录（默认与 workdir 同级）")
-    parser.add_argument("--keep", action="store_true", help="保留评测库（默认每次重建）")
+    parser.add_argument("--keep", action="store_true",
+                        help="连评测库一起保留（默认只重建评测库，历史报告始终保留）")
     args = parser.parse_args()
 
     workdir = Path(args.workdir).resolve()
@@ -591,6 +601,7 @@ def main() -> int:
 
     print(f"评测模式：{args.mode}　模型：{settings.LLM_MODEL}　用例：{len(cases)} 条")
     print(f"评测库：{workdir}")
+    print(f"历史报告：{workdir / 'reports'}（不会被本次运行清空）")
 
     out_dir = Path(args.out).resolve() if args.out else workdir / "reports"
     results: list[dict] = []
