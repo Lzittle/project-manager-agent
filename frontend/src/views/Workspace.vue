@@ -84,6 +84,10 @@
         <div class="ws-preview">
           <div class="ws-preview-head">{{ picked ? picked.name : '点左侧任意一项' }}</div>
           <p>{{ picked ? picked.text : '这里显示你选中的资料的摘要。' }}</p>
+          <template v-if="picked && picked.body">
+            <div class="ws-preview-body">{{ picked.body }}</div>
+            <p class="ws-preview-foot">{{ picked.foot }}</p>
+          </template>
         </div>
       </aside>
 
@@ -298,6 +302,8 @@ const repoDocs = [
   { name: 'docs/WORKFLOW.md', note: '怎么干', text: 'docs/ 下 · 每轮节奏：产出 → 人拍板 → 落盘。一轮只推进一个能验证的小步。' },
 ]
 
+const DOC_PREVIEW_CHARS = 1500  // 资产库预览最多渲染多少字（超出部分靠框内滚动）
+
 const filters = [
   { key: 'all', label: '全部' },
   { key: 'todo', label: '未开始' },
@@ -455,11 +461,19 @@ function pickRepoDoc(doc) {
 }
 
 function pickDocument(doc) {
+  // 项目记忆文档：点开要能看到正文（原来是只有一行说明，演示时看不出"资产库里真有东西"）。
+  // 侧栏窄，所以只渲染前 DOC_PREVIEW_CHARS 字（超出部分在框内滚动 + 底部注明全文体量）。
+  const full = (doc.content || '').trim()
+  const shown = full.length > DOC_PREVIEW_CHARS ? `${full.slice(0, DOC_PREVIEW_CHARS)}…` : full
   picked.value = {
     kind: 'doc',
     id: doc.id,
     name: doc.title,
     text: doc.summary || doc.content_preview || `${doc.doc_type || '文档'} · 已进项目记忆，Agent 检索时会读到它。`,
+    body: shown,
+    foot: full.length > shown.length
+      ? `预览前 ${DOC_PREVIEW_CHARS} 字 · 全文 ${full.length.toLocaleString()} 字，Agent 检索时读的是全文`
+      : `全文 ${full.length.toLocaleString()} 字 · Agent 检索时会读到它`,
   }
 }
 
@@ -638,6 +652,15 @@ watch(() => store.currentId, () => { reloadAll() })
 .ws-preview { margin-top: 14px; padding: 10px 11px; border: 1px solid var(--ws-line); border-radius: var(--ws-radius); background: var(--ws-surface); }
 .ws-preview-head { font-size: var(--p-fs-tag); color: var(--ws-fg3); margin-bottom: 5px; }
 .ws-preview p { margin: 0; font-size: var(--p-fs-meta); color: var(--ws-fg2); line-height: var(--p-lh-ui); }
+/* 项目记忆正文预览：侧栏窄，正文框内部滚动，不把左栏整体撑长（保住 D-014 的"只有该滚的地方滚"） */
+.ws-preview-body {
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--ws-line2);
+  max-height: 38vh; overflow-y: auto; overscroll-behavior: contain;
+  font-size: var(--p-fs-meta); color: var(--ws-fg2); line-height: var(--p-lh-ui);
+  white-space: pre-wrap; word-break: break-word;
+}
+.ws-preview .ws-preview-foot { margin-top: 6px; font-size: var(--p-fs-tag); color: var(--ws-fg3); }
 
 /* 中：对话 */
 .ws-chat { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
