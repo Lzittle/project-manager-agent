@@ -165,6 +165,55 @@ def test_delete_project_cascades(client):
     assert docs.status_code == 404  # 项目本身已不存在
 
 
+def test_delete_project_cleans_dependencies(client):
+    """删项目要清掉依赖边（含子项目整棵子树）。
+
+    回归背景（2026-09-16 演示彩排实测）：`_delete_one` 早期版本只删任务/评论/文档，
+    没删 task_dependencies，删项目后残留 15 条指向已删任务的孤儿依赖边，
+    会污染依赖总数与影响分析。这里同时断言"这批任务的边没了"和"全库无孤儿"。
+    """
+    from sqlalchemy.orm import aliased
+
+    from models.database import SessionLocal, Task, TaskDependency
+
+    root = _new_project(client, "依赖级联-根")
+    child = client.post("/api/projects?user_id=1", json={
+        "name": "依赖级联-子", "description": "pytest", "parent_id": root["id"]}).json()
+    ta = _new_task(client, root["id"], "任务A")
+    tb = _new_task(client, root["id"], "任务B")
+    tc = _new_task(client, child["id"], "任务C")
+    assert _link(client, ta["id"], tb["id"]).status_code == 201  # 根项目内：A 依赖 B
+    ids = [ta["id"], tb["id"], tc["id"]]
+
+    db = SessionLocal()
+    try:
+        assert db.query(TaskDependency).filter(
+            TaskDependency.task_id.in_(ids) | TaskDependency.depends_on_id.in_(ids)
+        ).count() == 1
+    finally:
+        db.close()
+
+    # 删根项目 → 子树（子项目 + 两边任务）一并清理
+    assert client.delete(f"/api/projects/{root['id']}").status_code == 200
+    assert client.get(f"/api/tasks/{ta['id']}").status_code == 404
+    assert client.get(f"/api/tasks/{tc['id']}").status_code == 404
+
+    db = SessionLocal()
+    try:
+        assert db.query(TaskDependency).filter(
+            TaskDependency.task_id.in_(ids) | TaskDependency.depends_on_id.in_(ids)
+        ).count() == 0
+        # 全库不应存在指向已删任务的孤儿依赖边（两端各 join 一次，缺失即孤儿）
+        left, right = aliased(Task), aliased(Task)
+        orphans = (db.query(TaskDependency)
+                   .outerjoin(left, left.id == TaskDependency.task_id)
+                   .outerjoin(right, right.id == TaskDependency.depends_on_id)
+                   .filter(left.id.is_(None) | right.id.is_(None)).count())
+        assert orphans == 0
+    finally:
+        db.close()
+
+
 # ---------- 知识库上传（自动向量化） + RAG 检索 ----------
 
 def test_knowledge_upload_and_rag(client):

@@ -8,7 +8,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from core import rag
-from models.database import Project, Task, TaskComment, KnowledgeDocument
+from models.database import Project, Task, TaskComment, TaskDependency, KnowledgeDocument
 
 MAX_PROJECT_DEPTH = 3  # 项目层级上限：根(1 级) → 子项目(2 级) → 孙项目(3 级)
 
@@ -96,7 +96,7 @@ def _descendant_postorder(db: Session, project_id: int) -> list[int]:
 
 
 def _delete_one(db: Session, project_id: int) -> Optional[dict]:
-    """删除单个项目及其从属数据（任务/评论/文档），文档向量同步清理。"""
+    """删除单个项目及其从属数据（任务/评论/依赖边/文档），文档向量同步清理。"""
     p = db.get(Project, project_id)
     if p is None:
         return None
@@ -108,9 +108,17 @@ def _delete_one(db: Session, project_id: int) -> Optional[dict]:
         rag.delete_document(doc.id)
     db.query(KnowledgeDocument).filter_by(project_id=project_id).delete(synchronize_session=False)
 
-    # 2) 任务与任务评论
+    # 2) 任务、任务评论与依赖边
     task_ids = [t.id for t in db.query(Task).filter_by(project_id=project_id).all()]
     if task_ids:
+        # 依赖边双向清理（与 task_service.delete_task 同口径）：本批任务既可能是依赖方
+        # (task_id)，也可能是别人的前置 (depends_on_id)。少了这一步，删项目会留下指向
+        # 已删任务的孤儿依赖边 —— 2026-09-16 彩排实测残留 15 条，会污染依赖总数与影响分析。
+        # 注意：外部项目指向本项目的依赖边也一并删除 —— 前置任务没了，该约束已不成立。
+        db.query(TaskDependency).filter(
+            TaskDependency.task_id.in_(task_ids)
+            | TaskDependency.depends_on_id.in_(task_ids)
+        ).delete(synchronize_session=False)
         db.query(TaskComment).filter(TaskComment.task_id.in_(task_ids)).delete(
             synchronize_session=False)
         db.query(Task).filter(Task.id.in_(task_ids)).delete(synchronize_session=False)
