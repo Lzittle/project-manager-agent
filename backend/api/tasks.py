@@ -5,23 +5,38 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from models.database import get_db, Task
+from models.database import get_db, Task, Member
 from models.schemas import TaskCreate, TaskUpdate, TaskOut, CommentCreate, CommentOut, DependencyCreate
 from services import task_service
 
 router = APIRouter()
 
 
-def _base_dict(task) -> dict:
-    """任务 ORM → dict + depends_on 摘要（前置任务 id 列表）。"""
+def _assignee_map(db: Session, tasks) -> dict:
+    """批量为任务取负责人（一次查名册，避免逐条回库）。"""
+    ids = {t.assignee_id for t in tasks if t.assignee_id}
+    if not ids:
+        return {}
+    rows = db.query(Member).filter(Member.id.in_(ids)).all()
+    return {m.id: m for m in rows}
+
+
+def _base_dict(task, member=None) -> dict:
+    """任务 ORM → dict + depends_on 摘要（前置任务 id 列表）+ 负责人名字。
+
+    assignee_name / assignee_status 不是 tasks 表的列，而是从 members 名册带出来的
+    （前端卡片直接读 assignee_name，D-018）。
+    """
     d = {c.name: getattr(task, c.name) for c in task.__table__.columns}
     d["depends_on"] = [dep.depends_on_id for dep in task.dependencies]
+    d["assignee_name"] = member.name if member else None
+    d["assignee_status"] = member.status if member else None
     return d
 
 
 def _with_deps(db: Session, task) -> dict:
     """单任务：依赖摘要 + 阻塞计数（逐条查前置任务状态）。"""
-    d = _base_dict(task)
+    d = _base_dict(task, _assignee_map(db, [task]).get(task.assignee_id))
     blocked = 0
     for dep in task.dependencies:
         pre = db.get(Task, dep.depends_on_id)
@@ -31,14 +46,15 @@ def _with_deps(db: Session, task) -> dict:
     return d
 
 
-def _list_with_deps(tasks) -> list[dict]:
+def _list_with_deps(db: Session, tasks) -> list[dict]:
     """列表：本项目任务状态一次成表，批量计算阻塞计数，避免每条任务逐次回库。
 
     前置任务必然同项目（跨项目依赖在创建层被拦截），未命中视为未完成保守计数。
     """
     status = {t.id: t.status for t in tasks}
+    members = _assignee_map(db, tasks)
     return [
-        {**_base_dict(t),
+        {**_base_dict(t, members.get(t.assignee_id)),
          "blocked_by_count": sum(
              1 for dep in t.dependencies if status.get(dep.depends_on_id) != "done")}
         for t in tasks
@@ -48,7 +64,7 @@ def _list_with_deps(tasks) -> list[dict]:
 @router.get("", response_model=list[TaskOut])
 def list_tasks(project_id: int = Query(..., description="项目 id"), db: Session = Depends(get_db)):
     tasks = task_service.list_tasks(db, project_id)
-    return _list_with_deps(tasks)
+    return _list_with_deps(db, tasks)
 
 
 @router.post("", response_model=TaskOut, status_code=201)
@@ -77,6 +93,9 @@ def get_task(task_id: int, db: Session = Depends(get_db)):
 
 @router.patch("/{task_id}", response_model=TaskOut)
 def update_task(task_id: int, body: TaskUpdate, db: Session = Depends(get_db)):
+    # 指派只认名册里的人（占位成员也算）：给一个不在名册里的 id 直接 404，别悄悄写脏数据
+    if body.assignee_id is not None and db.get(Member, body.assignee_id) is None:
+        raise HTTPException(404, f"成员 {body.assignee_id} 不在名册里")
     t = task_service.update_task(
         db, task_id,
         title=body.title, description=body.description, status=body.status,

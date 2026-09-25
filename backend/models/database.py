@@ -1,10 +1,14 @@
 """SQLAlchemy 数据库模型：业务表 + 引擎/Session 管理。
 
-表清单：users / projects / tasks / task_dependencies / task_comments /
+表清单：users / members / projects / tasks / task_dependencies / task_comments /
        chat_messages / knowledge_documents / plan_runs
 关联：用户 1-N 项目；项目 1-N 任务；任务 1-N 评论；任务 N-N 任务（依赖，经
-      task_dependencies 桥接）；用户 1-N 任务(assignee)；项目 1-N 知识库文档；
+      task_dependencies 桥接）；成员 1-N 任务(assignee)；项目 1-N 知识库文档；
       用户 1-N 聊天消息；项目 1-N 规划批次(plan_runs)
+
+「人」分两层（D-018）：**账号**（users）只管登录；**成员**（members）是小队名册上的
+一条人。任务的 assignee_id 指向成员而不是账号 —— 这样队长可以先手填占位成员、
+等人注册后再认领（PLAN §5.1）。
 """
 from datetime import datetime, date
 from sqlalchemy import (
@@ -54,6 +58,26 @@ def _run_light_migrations(engine) -> None:
                        "knowledge_documents 新增 doc_type 列（doc=文档 / meeting=会议纪要）")
         _ensure_column(conn, "projects", "parent_id", "INTEGER",
                        "projects 新增 parent_id 列（子项目层级，根项目为空）")
+        _ensure_member_roster(conn)
+
+
+def _ensure_member_roster(conn) -> None:
+    """老库兼容（2026-09-25）：把已有账号登记成成员名册，且让成员 id 与账号 id 对齐。
+
+    为什么：任务的 assignee_id 语义从「账号 id」改成「成员 id」（D-018）。
+    存量库里 assignee_id 存的是 users.id；只要成员 id 与账号 id 一致，
+    存量任务不必改一个数字就继续指向同一个「人」。
+    只在名册为空时执行：名册一旦用过（有手填成员），这里就不碰。
+    """
+    if conn.exec_driver_sql("SELECT COUNT(*) FROM members").scalar():
+        return
+    result = conn.exec_driver_sql(
+        "INSERT INTO members (id, name, user_id, status) "
+        "SELECT u.id, u.username, u.id, 'active' FROM users u"
+    )
+    conn.commit()
+    if result.rowcount:
+        print(f"[migrate] members 名册初始化：{result.rowcount} 个已有账号登记为成员（id 与账号对齐）")
 
 
 def _ensure_column(conn, table: str, column: str, ddl_type: str, log_msg: str) -> None:
@@ -78,9 +102,35 @@ class User(Base):
 
     # 关系（不含级联删除，避免误删数据）
     projects = relationship("Project", back_populates="creator")
-    assigned_tasks = relationship("Task", back_populates="assignee", foreign_keys="Task.assignee_id")
+    members = relationship("Member", back_populates="user")
     comments = relationship("TaskComment", back_populates="user")
     messages = relationship("ChatMessage", back_populates="user")
+
+
+class Member(Base):
+    """小队成员名册（队长眼里的「人」）。
+
+    三种来路都落到这张表（PLAN §5.1）：
+      - 注册入队：user_id 非空、status=active
+      - 占位后认领：队长先手填（user_id 为空、status=placeholder，带邀请码），
+        人注册后用邀请码认领这条占位身份（认领属于「轮 3」，尚未实现）
+      - 上传名单：Agent 读名单认人后写进同一条名册（轮 2）
+
+    任务的 assignee_id 指向本表（见 Task）。成员 id 与账号 id 不必相等，
+    老库里恰好对齐（见 _ensure_member_roster），所以存量任务无需改数。
+    """
+    __tablename__ = "members"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(50), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # 认领后指向账号
+    status = Column(String(20), nullable=False, default="placeholder",
+                    index=True)  # placeholder=待认领 / active=已注册
+    invite_code = Column(String(20), nullable=True, unique=True)  # 占位成员发给对方的邀请码
+    created_at = Column(DateTime, server_default=func.now())
+
+    user = relationship("User", back_populates="members")
+    tasks = relationship("Task", back_populates="assignee", foreign_keys="Task.assignee_id")
 
 
 class ChatMessage(Base):
@@ -129,13 +179,14 @@ class Task(Base):
     status = Column(String(20), nullable=False, default="todo", index=True)  # todo / doing / done
     priority = Column(String(10), nullable=False, default="medium", index=True)  # high / medium / low
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
-    assignee_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # 负责人 = 成员名册里的一条人（不是账号）：占位成员没有账号也能被指派（D-018）
+    assignee_id = Column(Integer, ForeignKey("members.id"), nullable=True, index=True)
     due_date = Column(Date, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     project = relationship("Project", back_populates="tasks")
-    assignee = relationship("User", back_populates="assigned_tasks", foreign_keys=[assignee_id])
+    assignee = relationship("Member", back_populates="tasks", foreign_keys=[assignee_id])
     comments = relationship("TaskComment", back_populates="task")
     # 依赖：task 依赖哪些前置任务；被哪些任务依赖（按需懒加载）
     dependencies = relationship(

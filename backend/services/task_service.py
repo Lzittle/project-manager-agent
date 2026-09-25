@@ -8,6 +8,7 @@ from typing import Optional
 from sqlalchemy.orm import Session, selectinload
 
 from models.database import Project, Task, TaskComment, TaskDependency
+from services import member_service
 
 
 # ---------- 任务 ----------
@@ -38,9 +39,11 @@ def create_task(
     """在指定项目下创建任务；项目不存在返回 None。"""
     if db.get(Project, project_id) is None:
         return None
+    # 负责人取创建者的成员身份（名册里查不到就不指派）：D-018 起 assignee_id 指向 members
+    owner = member_service.member_for_user(db, user_id)
     t = Task(title=title, description=description or "", status=status,
              priority=priority, project_id=project_id,
-             assignee_id=user_id, due_date=due_date)
+             assignee_id=owner.id if owner else None, due_date=due_date)
     db.add(t)
     db.commit()
     db.refresh(t)

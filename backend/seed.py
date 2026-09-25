@@ -8,7 +8,7 @@ from datetime import date
 from core import rag
 from models.database import (
     SessionLocal, init_db,
-    User, Project, Task, KnowledgeDocument, ChatMessage,
+    User, Member, Project, Task, KnowledgeDocument, ChatMessage,
 )
 
 DEMO_PASSWORD = "demo1234"
@@ -33,6 +33,9 @@ def seed() -> None:
             password_hash=_hash(DEMO_PASSWORD),
         )
         db.add(alice)
+        db.flush()
+        # 成员名册：账号 alice 同时是成员 #1（id 与账号对齐，存量任务的 assignee_id 天然指向它）
+        db.add(Member(name=alice.username, user_id=alice.id, status="active"))
         db.flush()
 
         # ---- 项目1：电商系统 + 5 个任务（示例：自然语言一键建项目场景）----

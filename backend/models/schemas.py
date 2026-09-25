@@ -24,6 +24,26 @@ class UserOut(BaseModel):
     created_at: Optional[datetime] = None
 
 
+# ---------- 成员（小队名册，D-018） ----------
+MemberStatus = Literal["placeholder", "active"]
+
+
+class MemberCreate(BaseModel):
+    """队长手填成员：只给名字，就能先被指派（占位成员，注册后认领）。"""
+    name: str = Field(min_length=1, max_length=50)
+
+
+class MemberOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    user_id: Optional[int] = None          # 认领后指向账号；占位成员为空
+    status: str                             # placeholder / active
+    invite_code: Optional[str] = None       # 占位成员的邀请码
+    created_at: Optional[datetime] = None
+
+
 # ---------- 项目 ----------
 ProjectStatus = Literal["active", "archived"]
 
@@ -89,6 +109,9 @@ class TaskOut(BaseModel):
     priority: str
     project_id: int
     assignee_id: Optional[int] = None
+    # 下面两个字段由接口层从 members 名册填充（不是 tasks 表的列）
+    assignee_name: Optional[str] = None    # 负责人名字（占位成员也有名字）
+    assignee_status: Optional[str] = None  # placeholder=待认领 / active=已注册
     due_date: Optional[date] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
