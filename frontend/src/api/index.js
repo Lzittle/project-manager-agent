@@ -36,6 +36,13 @@ export const taskApi = {
   remove: (id) => http.delete(`/tasks/${id}`),
 }
 
+// ---------- 小队成员名册（D-017 / D-018） ----------
+// 成员是「人」的实体：占位成员没有账号，注册后认领；任务负责人指向成员。
+export const memberApi = {
+  list: () => http.get('/members'),
+  create: (name) => http.post('/members', { name }),
+}
+
 // ---------- 知识库文档 ----------
 export const knowledgeApi = {
   list: (projectId) => http.get(`/projects/${projectId}/documents`),

@@ -34,6 +34,39 @@
         <button class="ws-chip" :class="{ on: liveOpen }" type="button" @click="toggleLive">任务</button>
       </div>
 
+      <!-- 窄屏（≤900px）左栏会整块收起，名册改从顶栏进 -->
+      <div class="ws-memberbtn">
+        <button
+          class="ws-chip ws-memberchip"
+          :class="{ on: rosterOpen }"
+          type="button"
+          :aria-expanded="rosterOpen"
+          @click="rosterOpen = !rosterOpen"
+        >成员 · {{ members.length }}</button>
+        <div v-if="rosterOpen" class="ws-pop ws-poptop" role="dialog" aria-label="小队成员">
+          <div class="ws-pophead"><b>小队成员</b><span>占位成员带邀请码</span></div>
+          <div v-for="m in members" :key="m.id" class="ws-poprow static">
+            <span class="ws-pava" :class="{ empty: m.status !== 'active' }">{{ m.name.slice(-1) }}</span>
+            <span class="ws-popname">{{ m.name }}</span>
+            <span v-if="m.status !== 'active'" class="ws-code">{{ m.invite_code }}</span>
+            <span class="ws-tag" :class="m.status === 'active' ? 'ok' : 'wait'">
+              {{ m.status === 'active' ? '已注册' : '待认领' }}
+            </span>
+          </div>
+          <div class="ws-popnew">
+            <input
+              v-model="newMemberName"
+              class="ws-minput"
+              type="text"
+              placeholder="手填名字…"
+              aria-label="手填成员名字"
+              @keydown.enter="addRosterMember"
+            />
+            <button class="ws-btn solid" type="button" @click="addRosterMember">出邀请码</button>
+          </div>
+        </div>
+      </div>
+
       <button
         class="ws-chip ws-fontbtn"
         type="button"
@@ -79,6 +112,31 @@
         </button>
         <div v-if="!documents.length" class="ws-empty-small">
           {{ store.currentId ? '这个项目还没有记忆文档' : '先在顶部选一个项目' }}
+        </div>
+
+        <!-- 小队成员名册：占位成员（还没注册的人）也能被指派，邀请码发给对方认领 -->
+        <div class="ws-group">小队成员 · 名册</div>
+        <div class="ws-roster">
+          <div v-for="m in members" :key="m.id" class="ws-member" :class="{ wait: m.status !== 'active' }">
+            <span class="ws-pava" :class="{ empty: m.status !== 'active' }">{{ m.name.slice(-1) }}</span>
+            <span class="ws-mname">{{ m.name }}</span>
+            <span v-if="m.status !== 'active'" class="ws-code">{{ m.invite_code }}</span>
+            <span class="ws-tag" :class="m.status === 'active' ? 'ok' : 'wait'">
+              {{ m.status === 'active' ? '已注册' : '待认领' }}
+            </span>
+          </div>
+          <div v-if="!members.length" class="ws-empty-small">还没有成员，手填一个名字就能开始指派。</div>
+          <div class="ws-addmember">
+            <input
+              v-model="newMemberName"
+              class="ws-minput"
+              type="text"
+              placeholder="手填名字…"
+              aria-label="手填成员名字"
+              @keydown.enter="addRosterMember"
+            />
+            <button class="ws-btn" type="button" @click="addRosterMember">出邀请码</button>
+          </div>
         </div>
 
         <div class="ws-preview">
@@ -228,9 +286,50 @@
                 <h4>{{ t.title }}</h4>
                 <div v-if="isBlocked(t)" class="ws-cardnote">被前置任务卡住，前置完成后可开工</div>
                 <div class="ws-cardfoot">
-                  <span class="ws-pava" :class="{ empty: !t.assignee_name }">{{ t.assignee_name ? t.assignee_name.slice(-1) : '+' }}</span>
-                  <span class="ws-who">{{ t.assignee_name || '未分配' }}</span>
+                  <button
+                    class="ws-whochip"
+                    :class="{ empty: !t.assignee_name }"
+                    type="button"
+                    :aria-expanded="assignFor === t.id"
+                    :aria-label="t.assignee_name ? '改派「' + t.title + '」' : '给「' + t.title + '」指派负责人'"
+                    @click="toggleAssign(t)"
+                  >
+                    <span class="ws-pava" :class="{ empty: !t.assignee_name }">{{ t.assignee_name ? t.assignee_name.slice(-1) : '+' }}</span>
+                    <span class="ws-who">{{ t.assignee_name || '指派' }}</span>
+                  </button>
                   <span v-if="isFresh(t)" class="ws-fresh">新</span>
+
+                  <!-- 就地选人：不弹模态、不跳页（D-007） -->
+                  <div v-if="assignFor === t.id" class="ws-pop" role="dialog" aria-label="指派给谁">
+                    <div class="ws-pophead"><b>指派给谁？</b><span>选名册里的人</span></div>
+                    <button
+                      v-for="m in members"
+                      :key="m.id"
+                      class="ws-poprow"
+                      type="button"
+                      @click="assignTo(t, m)"
+                    >
+                      <span class="ws-pava" :class="{ empty: m.status !== 'active' }">{{ m.name.slice(-1) }}</span>
+                      <span class="ws-popname">{{ m.name }}</span>
+                      <span v-if="m.status !== 'active'" class="ws-code">{{ m.invite_code }}</span>
+                      <span class="ws-tag" :class="m.status === 'active' ? 'ok' : 'wait'">
+                        {{ m.status === 'active' ? '已注册' : '待认领' }}
+                      </span>
+                    </button>
+                    <div v-if="!members.length" class="ws-empty-small">名册还是空的，在下面填个名字。</div>
+                    <div class="ws-popnew">
+                      <input
+                        v-model="assignNewName"
+                        class="ws-minput"
+                        type="text"
+                        placeholder="新成员名字…"
+                        aria-label="新成员名字"
+                        @keydown.enter="addMemberAndAssign(t)"
+                      />
+                      <button class="ws-btn solid" type="button" @click="addMemberAndAssign(t)">新建并指派</button>
+                    </div>
+                    <p class="ws-popfoot">新建的是占位身份（带邀请码），对方注册后认领；指派不改任务状态。</p>
+                  </div>
                 </div>
               </article>
             </section>
@@ -244,14 +343,17 @@
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { chatApi, knowledgeApi, taskApi, USER_ID } from '../api'
+import { chatApi, knowledgeApi, memberApi, taskApi, USER_ID } from '../api'
 import { useProjectStore } from '../stores/project'
 import ChatMessage from '../components/ChatMessage.vue'
 
 const store = useProjectStore()
 
-// 账号体系落地前：先用演示用户的名字当「我」（见 DECISIONS D-003）
-const meName = ref('alice')
+// 名册（小队成员）：占位成员也能被指派，注册后认领（D-017 / D-018）
+const members = ref([])
+const myMember = computed(() => members.value.find((m) => m.user_id === USER_ID) || null)
+// 「我」= 当前账号在名册里对应的成员；名册还没到位时回退到演示用户名（D-003 的过渡）
+const meName = computed(() => myMember.value?.name || 'alice')
 const scope = ref('team')          // team | me
 const filter = ref('all')          // all | todo | doing
 const assetsOpen = ref(true)
@@ -414,11 +516,80 @@ async function loadMine() {
     lists.forEach((list, i) => {
       const projectName = store.projects[i].name
       list
-        .filter((t) => (t.assignee_name || '') === meName.value)
+        .filter(isMine)
         .forEach((t) => mine.push({ ...t, _projectName: projectName }))
     })
     mineTasks.value = mine
   } catch { mineTasks.value = [] }
+}
+
+// 我的任务：按成员身份（assignee_id）过滤；名册还没到位时回退到名字匹配（D-010 的过渡办法）
+function isMine(t) {
+  const me = myMember.value
+  if (me) return t.assignee_id === me.id
+  return (t.assignee_name || '') === meName.value
+}
+
+async function loadMembers() {
+  try { members.value = await memberApi.list() } catch { members.value = [] }
+}
+
+// ---------- 指派（D-017 / D-018）：只改负责人、不改状态；就地选人，不弹模态 ----------
+const assignFor = ref(0)         // 哪张卡片的指派浮层开着（存任务 id，0 = 都关着）
+const assignNewName = ref('')    // 浮层里「新建成员」输入
+const rosterOpen = ref(false)    // 顶栏名册浮层（窄屏用）
+const newMemberName = ref('')    // 左栏名册「手填名字」输入
+const assignBusy = ref(false)
+
+function toggleAssign(t) {
+  assignFor.value = assignFor.value === t.id ? 0 : t.id
+  assignNewName.value = ''
+}
+
+async function assignTo(t, m) {
+  if (assignBusy.value) return
+  assignBusy.value = true
+  try {
+    const updated = await taskApi.update(t.id, { assignee_id: m.id })
+    const i = tasks.value.findIndex((x) => x.id === t.id)
+    if (i >= 0) tasks.value[i] = updated
+    assignFor.value = 0
+    ElMessage.success(`已把「${t.title}」派给 ${m.name}`)
+    if (scope.value === 'me') await loadMine()
+  } catch (e) {
+    ElMessage.error('指派失败：' + e.message)
+  } finally {
+    assignBusy.value = false
+  }
+}
+
+async function addMember(rawName) {
+  const name = (rawName || '').trim()
+  if (!name) return null
+  try {
+    const m = await memberApi.create(name)
+    members.value = [...members.value, m]
+    return m
+  } catch (e) {
+    // 同名不自动合并：让用户自己确认是不是同一个人（PLAN §5）
+    if (String(e.message).includes('同名')) ElMessage.warning(e.message)
+    else ElMessage.error('加成员失败：' + e.message)
+    return null
+  }
+}
+
+async function addRosterMember() {
+  const m = await addMember(newMemberName.value)
+  if (!m) return
+  newMemberName.value = ''
+  ElMessage.success(`「${m.name}」已进名册：待认领 · 邀请码 ${m.invite_code}`)
+}
+
+async function addMemberAndAssign(t) {
+  const m = await addMember(assignNewName.value)
+  if (!m) return
+  assignNewName.value = ''
+  await assignTo(t, m)
 }
 
 // 全局范围：不选项目时，右侧给全队的任务分布，点一行进入那个项目
@@ -441,7 +612,7 @@ async function loadOverview() {
 
 async function reloadAll() {
   picked.value = null
-  await Promise.all([loadThread(), loadTasks(), loadDocuments()])
+  await Promise.all([loadThread(), loadTasks(), loadDocuments(), loadMembers()])
   if (scope.value === 'me') await loadMine()
   if (!store.currentId) await loadOverview()
 }
@@ -789,7 +960,7 @@ watch(() => store.currentId, () => { reloadAll() })
 .ws-col-doing > .ws-colhead b { color: var(--ws-on-mint); }
 .ws-col-done > .ws-colhead { background: var(--ws-sand); color: var(--ws-on-sand); }
 .ws-col-done > .ws-colhead b { color: var(--ws-on-sand); }
-.ws-card { padding: 9px 10px; border: 1px solid var(--ws-line2); border-radius: var(--ws-radius-sm); background: var(--ws-surface); }
+.ws-card { position: relative; padding: 9px 10px; border: 1px solid var(--ws-line2); border-radius: var(--ws-radius-sm); background: var(--ws-surface); }
 .ws-card.locked { background: var(--ws-peach); border-color: var(--ws-peach); }
 .ws-card h4 { margin: 6px 0 7px; font-size: var(--p-fs-ui); font-weight: 500; line-height: var(--p-lh-tight); }
 .ws-cardnote { font-size: var(--p-fs-tag); color: var(--ws-on-peach); margin-bottom: 7px; }
@@ -798,6 +969,56 @@ watch(() => store.currentId, () => { reloadAll() })
 .ws-pri { display: inline-block; font-size: var(--p-fs-eyebrow); letter-spacing: 0.04em; color: var(--ws-fg2); }
 .ws-pri.high { color: var(--ws-danger); font-weight: 600; }
 .ws-pri.medium, .ws-pri.low { color: var(--ws-fg2); }
+
+/* ---------- 小队成员名册 + 指派浮层（D-017 / D-018） ---------- */
+.ws-roster { border: 1px solid var(--ws-accent-line); border-radius: var(--ws-radius-sm); background: var(--ws-surface); padding: 8px; }
+.ws-member { display: flex; align-items: center; gap: 7px; padding: 3px 2px; font-size: var(--p-fs-ui); }
+.ws-member .ws-mname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--p-fs-eyebrow); color: var(--ws-fg3); }
+.ws-tag { font-size: var(--p-fs-eyebrow); border-radius: var(--p-r-xs); padding: 1px 6px; white-space: nowrap; }
+.ws-tag.ok { color: var(--ws-on-mint); background: var(--ws-mint); }
+.ws-tag.wait { color: var(--ws-on-peach); background: var(--ws-peach); }
+.ws-addmember { display: flex; gap: 6px; margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--ws-line2); }
+.ws-minput {
+  flex: 1; min-width: 0; font: inherit; font-size: var(--p-fs-ui); color: var(--ws-fg);
+  padding: 4px 8px; border: 1px solid var(--ws-line); border-radius: var(--ws-radius-sm);
+  background: var(--ws-surface);
+}
+.ws-minput::placeholder { color: var(--ws-fg3); }
+.ws-btn.solid { color: #fff; background: var(--ws-accent); border-color: var(--ws-accent); font-weight: 600; }
+.ws-btn.solid:hover { color: #fff; background: var(--ws-accent-strong); border-color: var(--ws-accent-strong); }
+
+.ws-memberbtn { position: relative; }
+.ws-memberchip { display: none; }
+.ws-whochip {
+  display: inline-flex; align-items: center; gap: 6px; font: inherit;
+  padding: 2px 8px 2px 3px; border: 1px solid var(--ws-line); border-radius: 999px;
+  background: var(--ws-surface); color: var(--ws-fg2); cursor: pointer;
+}
+.ws-whochip:hover { border-color: var(--ws-accent-line); background: var(--ws-accent-wash); }
+.ws-whochip.empty { border-style: dashed; color: var(--ws-fg3); padding: 2px 9px; }
+.ws-pop {
+  position: absolute; z-index: 5; top: calc(100% + 5px); left: 0;
+  width: 236px; max-width: 100%;
+  padding: 8px; text-align: left;
+  background: var(--ws-surface); border: 1px solid var(--ws-line);
+  border-radius: var(--p-r-lg); box-shadow: var(--el-box-shadow-dark);
+}
+.ws-pophead { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; padding: 2px 4px 6px; }
+.ws-pophead b { font-size: var(--p-fs-ui); font-weight: 600; }
+.ws-pophead span { font-size: var(--p-fs-tag); color: var(--ws-fg3); }
+.ws-poprow {
+  display: flex; align-items: center; gap: 7px; width: 100%; font: inherit;
+  padding: 5px 6px; border: 0; border-radius: var(--ws-radius-sm);
+  background: transparent; color: var(--ws-fg); text-align: left; cursor: pointer;
+}
+.ws-poprow:hover { background: var(--ws-plain); }
+.ws-poprow.static { cursor: default; }
+.ws-poprow.static:hover { background: transparent; }
+.ws-poprow .ws-popname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-popnew { display: flex; gap: 6px; margin-top: 5px; padding-top: 8px; border-top: 1px solid var(--ws-line2); }
+.ws-popfoot { margin: 8px 2px 0; font-size: var(--p-fs-tag); color: var(--ws-fg3); line-height: var(--p-lh-ui); }
+.ws-poptop { top: calc(100% + 6px); }
 
 /* 我的任务 */
 .ws-mygroup { margin-bottom: 12px; }
@@ -816,6 +1037,7 @@ watch(() => store.currentId, () => { reloadAll() })
 }
 @media (max-width: 900px) {
   .ws-assets { display: none; }
+  .ws-memberchip { display: inline-block; }
   .ws-live { flex: 0 0 46%; }
   .ws-board { grid-template-columns: 1fr; }
 }
