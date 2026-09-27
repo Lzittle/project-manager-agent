@@ -20,10 +20,14 @@ from typing import Any, Optional
 
 from core import llm
 from core.rag import search as rag_search
-from models.database import SessionLocal, Project, Task, PlanRun
-from services import knowledge_service, project_service, task_service
+from models.database import (SessionLocal, Project, Task, PlanRun, AssignmentRun,
+                             KnowledgeDocument)
+from services import knowledge_service, member_service, project_service, task_service
 
 MAX_ITER = 8  # 单轮最多工具迭代次数，防死循环
+
+# 优先级中文（拼提示词与轨迹文案用）
+_PRI_CN = {"high": "高", "medium": "中", "low": "低"}
 
 
 def _clip(v: Any, limit: int = 120) -> str:
@@ -50,6 +54,18 @@ def build_system_prompt(project_id: Optional[int] = None,
    - 「任务清单/任务列表/看板/进度」是只读请求：基于已有任务数据回答，禁止调用 plan_tasks 新建一批；
    - 用户说「把结论记下来/存成会议纪要/归档/记进资料库/沉淀一下」→ 调用 save_meeting，
      把本次对话中双方确认过的结论/决策/下一步行动整理成纪要入库（内容忠于本次对话，不得编造）。"""
+    prompt += """
+
+指派（把任务交给谁）：
+8. 「把 XX 派给张三」「这活给李工」「39 号任务改成陈工负责」→ 先 list_tasks 拿 task_id、
+   list_members 拿 member_id，再 assign_task；名册里确实没有这个人，先 create_member 建占位成员
+   （会带邀请码，要告诉用户「注册后用邀请码认领即成为本人」）再指派。
+   匹配不到人、或有重名时先问一句，绝不猜。指派只改负责人，**不要顺手把状态改成进行中**。
+9. 「按我上传的名单/人员说明分配」「把任务分下去」→ 先调 plan_assignment_from_doc
+   （读资产库资料 + 名册 + 未完成任务，**不写库**），把工具返回的 markdown 方案原样呈现给用户，
+   并说明「还没落库、确认后才生效」。用户确认（「就按这个来」「确认」）或提出微调后，再调
+   apply_assignment 落库（微调用 overrides 传，形如 [{"task_id":39,"member_name":"李工"}]）。
+   **用户没确认之前，绝不调用 apply_assignment。**"""
     if project_id is not None:
         name_desc = f"，名称「{project_name}」" if project_name else ""
         prompt += (
@@ -166,6 +182,38 @@ def is_ask_detail_intent(text: str) -> bool:
     return bool(_COUNT_TASK.search(text)) and not _DETAIL_MARK.search(text)
 
 
+# 「按名单分配」与「确认落库」的确定性识别（代码拍板，避免模型漏调工具）
+_ROSTER_DOC_HINT = re.compile(
+    r"名单|人员说明|人员介绍|人员资料|分工说明|团队介绍|团队成员|上传的(?:说明|资料|文档)")
+_ASSIGN_PLAN_HINT = re.compile(r"分配|分工|安排|分下去|分给|认人|落到人")
+# 确认语：短句、明确的「按这个方案来」；只在真的有待确认方案时才生效（见 resolve_bound_action）
+_APPLY_ASSIGN_HINT = re.compile(
+    r"(?:就)?(?:按|照|依)(?:这个|这份|上述|上面的|你(?:说|给)的)(?:方案|分配|安排|名单)?(?:来|办|执行|落库)?"
+    r"|^(?:确认|确认吧|确认分配|同意|没问题|就这样|照这个来|落库|执行吧|开始分配|开始吧)[，,。!！\s]*$")
+
+
+def is_assign_plan_intent(text: str) -> bool:
+    """是否「按上传的名单/人员说明做分配」：既要提到名单类资料，也要有分配动作。"""
+    t = (text or "").strip()
+    return bool(_ROSTER_DOC_HINT.search(t)) and bool(_ASSIGN_PLAN_HINT.search(t))
+
+
+def is_apply_assignment_intent(text: str) -> bool:
+    """是否「确认把分配方案落库」。只在存在待确认方案时路由（见 resolve_bound_action），
+    所以这里可以宽松一点，也不用担心闲聊里的「确认」被误判。"""
+    t = (text or "").strip()
+    if not t or len(t) > 40:
+        return False
+    return bool(_APPLY_ASSIGN_HINT.search(t))
+
+
+def has_pending_assignment(db, user_id: int, project_id: int) -> bool:
+    """该项目是否有一份还没落库的分配方案（决定「确认」这句话要不要走落库路由）。"""
+    return (db.query(AssignmentRun)
+            .filter_by(user_id=user_id, project_id=project_id, status="pending")
+            .order_by(AssignmentRun.id.desc()).first()) is not None
+
+
 def resolve_bound_action(db, user_id: int, bound_project_id: Optional[int],
                          bound_project_name: Optional[str], message: str):
     """绑定项目场景下，把「高确定性」的情况在进入 LLM 前先用代码判定：
@@ -187,6 +235,12 @@ def resolve_bound_action(db, user_id: int, bound_project_id: Optional[int],
     other = find_project_mention(db, user_id, bound_project_id, message)
     if other is not None and _is_task_write_intent(message):
         return ("conflict", other.name)
+    # 名单分配 / 确认落库：都要求「绑定项目」，且判在 plan 之前 ——
+    # 「按名单安排任务」不该被当成「按项目主题自动规划一批任务」。
+    if is_assign_plan_intent(message):
+        return ("assign_plan", None)
+    if has_pending_assignment(db, user_id, bound_project_id) and is_apply_assignment_intent(message):
+        return ("apply", None)
     if is_plan_intent(message):
         return ("plan", None)
     if is_ask_detail_intent(message):
@@ -315,6 +369,55 @@ TOOLS: list[dict] = [
         {"project_id": {"type": "integer", "description": "要规划任务的项目 id（可省略，默认当前绑定项目）"},
          "force": {"type": "boolean",
                    "description": "true=用户明确要求重新规划一批新任务；默认 false 时，该项目刚规划过会直接复用上一批，不重复创建"}},
+        [],
+    ),
+    _fn(
+        "list_members",
+        "查看小队成员名册（含 id、名字、状态：active=已注册 / placeholder=待认领）。"
+        "指派任务前先用它把「人」匹配到 member_id；名册里确实没有这个人时，才考虑 create_member",
+        {},
+        [],
+    ),
+    _fn(
+        "create_member",
+        "把一个人加进小队名册（占位成员：只有名字、没有账号，会带一个邀请码，等对方注册后认领）。"
+        "用于「把某某加进小队」，或在指派时名册里还没有这个人。"
+        "同名会失败并返回已有成员 id —— 这时要问用户是不是同一个人，不要重复添加",
+        {"name": {"type": "string", "description": "成员名字（如「陈工」）"}},
+        ["name"],
+    ),
+    _fn(
+        "assign_task",
+        "把任务指派给某个成员：只改负责人，**不改任务状态**。"
+        "用于「把 XX 派给张三」「这个任务交给李工」「39 号任务改成陈工负责」。"
+        "先 list_tasks 拿 task_id、list_members 拿 member_id（名册没有就先 create_member）。"
+        "匹配不到人或遇到重名时先问一句，绝不猜",
+        {"task_id": {"type": "integer", "description": "任务 id"},
+         "member_id": {"type": "integer", "description": "成员 id（来自 list_members）"}},
+        ["task_id", "member_id"],
+    ),
+    _fn(
+        "plan_assignment_from_doc",
+        "读资产库里的资料（默认取该项目最近上传的一篇，通常是「相关人员说明/名单」），"
+        "跟小队名册和「未完成任务」对上号，拟出一份「任务 → 负责人」的分配方案。"
+        "**这一步不写库**：先把方案给用户过一眼，用户确认后再用 apply_assignment 落库。"
+        "用于「按我上传的名单分配」「把任务分下去」「按人员说明安排好」",
+        {"doc_id": {"type": "integer", "description": "指定资料 id（可省略：默认取该项目最近上传的一篇）"},
+         "project_id": {"type": "integer", "description": "项目 id（可省略，默认当前绑定项目）"}},
+        [],
+    ),
+    _fn(
+        "apply_assignment",
+        "把上一步的分配方案真正落库（写任务的 assignee_id）。"
+        "只在用户明确确认后才调用（「就按这个来」「确认分配」「落库」）。"
+        "方案里名册没有的人会同时建成占位成员（带邀请码）；重名的条目会跳过并报告，绝不猜",
+        {"plan_id": {"type": "integer", "description": "方案 id（可省略：默认最近一份待确认的方案）"},
+         "overrides": {"type": "array",
+                       "description": "微调：只覆盖指定任务的负责人，"
+                                      "形如 [{\"task_id\": 39, \"member_name\": \"李工\"}]",
+                       "items": {"type": "object",
+                                 "properties": {"task_id": {"type": "integer"},
+                                                "member_name": {"type": "string"}}}}},
         [],
     ),
 ]
@@ -616,8 +719,12 @@ class _ToolExecutor:
         "delete_task": "删除任务", "delete_project": "删除项目",
         "update_task_fields": "编辑任务", "update_project_fields": "编辑项目",
         "project_snapshot": "读取项目状态", "save_meeting": "保存会议纪要",
+        "list_members": "查看成员名册", "create_member": "添加成员",
+        "assign_task": "指派任务", "plan_assignment_from_doc": "按名单拟分配方案",
+        "apply_assignment": "落库分配方案",
     }
-    _TASK_TOOLS = {"create_task", "update_task_status", "delete_task", "update_task_fields"}
+    _TASK_TOOLS = {"create_task", "update_task_status", "delete_task", "update_task_fields",
+                   "assign_task"}
     _PROJECT_TOOLS = {"create_project", "delete_project", "update_project_fields"}
 
     def _refs_from(self, name: str, args: dict, result: dict) -> list[dict]:
@@ -635,6 +742,11 @@ class _ToolExecutor:
             for t in data:
                 refs.append({"kind": "task", "id": t["id"], "title": t["title"],
                              "project_id": pid})
+        elif name in ("plan_assignment_from_doc", "apply_assignment") and isinstance(data, list):
+            pid = args.get("project_id") or self.project_id
+            for it in data:
+                refs.append({"kind": "task", "id": it.get("id") or it.get("task_id"),
+                             "title": it.get("title", ""), "project_id": pid})
         return refs
 
     def summarize_tool(self, name: str, args: dict, result: dict, ms: int = 0) -> dict:
@@ -681,6 +793,20 @@ class _ToolExecutor:
             detail = f"检索到 {len(data)} 条相关片段" if data else "知识库暂无相关内容"
         elif name == "save_meeting" and isinstance(data, dict):
             detail = f"纪要「{data.get('title','')}」已存入知识库"
+        elif name == "list_members" and isinstance(data, list):
+            active = sum(1 for m in data if m.get("status") == "active")
+            detail = f"名册 {len(data)} 人（已注册 {active} · 待认领 {len(data) - active}）"
+        elif name == "create_member" and isinstance(data, dict):
+            detail = f"「{data.get('name','')}」已进名册（待认领 · 邀请码 {data.get('invite_code','')}）"
+        elif name == "assign_task" and isinstance(data, dict):
+            detail = (f"任务「{data.get('title','')}」负责人 → {data.get('assignee_name','')}"
+                      f"（状态仍为 {data.get('status','')}）")
+        elif name == "plan_assignment_from_doc" and isinstance(data, list):
+            detail = f"按名单拟出 {len(data)} 条分配（待确认，未落库）"
+        elif name == "apply_assignment" and isinstance(data, list):
+            extra = len(result.get("created_members") or [])
+            detail = (f"落库 {len(data)} 条指派"
+                      + (f"，新建 {extra} 个占位成员" if extra else ""))
         else:
             detail = f"{label}完成"
         step = {"tool": name, "label": label, "detail": _clip(detail, 120),
@@ -886,6 +1012,251 @@ class _ToolExecutor:
                 "note": (f"{mode} {len(created)} 个任务、{dep_created} 条依赖（默认均为待办），"
                          "可在看板查看并拖拽流转状态"),
             }
+        finally:
+            db.close()
+
+    # ---------- 小队成员与指派（D-017 / D-018 / D-019） ----------
+    def list_members(self) -> dict:
+        """名册（已注册在前、待认领在后）。指派前用它把人匹配到 member_id。"""
+        db = SessionLocal()
+        try:
+            rows = member_service.list_members(db)
+            return {"ok": True, "data": [
+                {"id": m.id, "name": m.name, "status": m.status,
+                 "user_id": m.user_id, "invite_code": m.invite_code} for m in rows]}
+        finally:
+            db.close()
+
+    def create_member(self, name: str) -> dict:
+        """把一个名字加进名册（占位成员 + 邀请码）。同名不合并，让上层问人。"""
+        n = (name or "").strip()
+        if not n:
+            return {"ok": False, "error": "成员名字不能为空"}
+        db = SessionLocal()
+        try:
+            same = member_service.find_by_name(db, n)
+            if same:
+                return {"ok": False,
+                        "error": f"名册里已有同名成员（id: {', '.join(str(m.id) for m in same)}）："
+                                 "请先确认是不是同一个人，不要重复添加"}
+            m = member_service.create_member(db, n)
+            return {"ok": True,
+                    "data": {"id": m.id, "name": m.name, "status": m.status,
+                             "invite_code": m.invite_code},
+                    "note": f"「{m.name}」已进名册（待认领），邀请码 {m.invite_code}；"
+                            "把邀请码发给 TA，注册后即可认领这条身份"}
+        finally:
+            db.close()
+
+    def assign_task(self, task_id: int, member_id: int) -> dict:
+        """把任务指派给成员：只改负责人，不改状态（D-005）。"""
+        db = SessionLocal()
+        try:
+            t = task_service.get_task(db, task_id)
+            if t is None:
+                return {"ok": False, "error": f"任务 {task_id} 不存在"}
+            m = member_service.get_member(db, member_id)
+            if m is None:
+                return {"ok": False,
+                        "error": f"成员 {member_id} 不在名册里（先用 list_members 查，或用 create_member 建人）"}
+            if self.project_id is not None and t.project_id != self.project_id:
+                return {"ok": False, "error": "该任务不在当前绑定的项目里，已拒绝跨项目指派"}
+            t = task_service.update_task(db, task_id, assignee_id=m.id)
+            return {"ok": True,
+                    "data": {"id": t.id, "title": t.title, "status": t.status,
+                             "project_id": t.project_id, "assignee_id": m.id,
+                             "assignee_name": m.name, "assignee_status": m.status},
+                    "note": f"负责人已改为「{m.name}」"
+                            + ("（占位成员，等 TA 注册后认领）" if m.status != "active" else "")
+                            + "；任务状态保持不变"}
+        finally:
+            db.close()
+
+    # ---------- 读名单 → 认人 → 分配方案（轮 2，D-017） ----------
+    ROSTER_CHARS = 6000  # 名单一般不长；截断防止把整篇长文塞进提示词
+
+    @classmethod
+    def _roster_text(cls, doc) -> str:
+        return (doc.content or "").strip()[:cls.ROSTER_CHARS]
+
+    @staticmethod
+    def _normalize_assign_items(raw, tasks, members) -> list[dict]:
+        """把模型输出规范成可核对、可落库的条目。
+
+        认人规则（D-017「不许猜」）：
+          - task_id 必须命中本次给出的任务清单；
+          - 名字在名册里唯一命中 → 记 member_id；
+          - 一条都没命中 → needs_create=True（确认后建占位成员）；
+          - 命中多条 → ambiguous=True（落库时跳过，请人来定）。
+        """
+        by_name: dict[str, list] = {}
+        for m in members:
+            by_name.setdefault(m.name, []).append(m)
+        valid_ids = {t.id for t in tasks}
+        raw_items = raw if isinstance(raw, list) else (raw.get("items") if isinstance(raw, dict) else [])
+        out, seen = [], set()
+        for item in raw_items or []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                tid = int(item.get("task_id"))
+            except (TypeError, ValueError):
+                continue
+            name = str(item.get("member_name") or "").strip()
+            if tid not in valid_ids or tid in seen or not name:
+                continue
+            seen.add(tid)
+            hits = by_name.get(name, [])
+            out.append({"task_id": tid, "member_name": name,
+                        "reason": str(item.get("reason") or "").strip()[:40],
+                        "member_id": hits[0].id if len(hits) == 1 else None,
+                        "needs_create": len(hits) == 0,
+                        "ambiguous": len(hits) > 1})
+        return out
+
+    @staticmethod
+    def _assign_markdown(plan_id: int, doc_title: str, items: list[dict]) -> str:
+        """把方案拼成给用户看的表格（不依赖模型二次生成，避免它改数）。"""
+        lines = ["| 任务 | 负责人 | 依据 |", "| --- | --- | --- |"]
+        for it in items:
+            who = it["member_name"]
+            if it.get("ambiguous"):
+                who += "（名册里有重名，待你定）"
+            elif it.get("needs_create"):
+                who += "（名册没有，确认后建占位成员）"
+            lines.append(f"| #{it['task_id']} {it['title']} | {who} | {it.get('reason', '')} |")
+        return (f"我按《{doc_title}》拟了一份分配方案（方案 #{plan_id}，**还没落库**）：\n\n"
+                + "\n".join(lines)
+                + "\n\n确认就说「就按这个来」；要改就说「第 #39 条改成李工」。")
+
+    def plan_assignment_from_doc(self, doc_id: Optional[int] = None,
+                                 project_id: Optional[int] = None) -> dict:
+        """读名单资料 → 认人 → 拟「任务 → 负责人」方案（**不写库**，D-017）。"""
+        pid = project_id or self.project_id
+        if pid is None:
+            return {"ok": False, "error": "未指定项目：请先绑定项目或在话术中说明项目名称"}
+        db = SessionLocal()
+        try:
+            if doc_id is not None:
+                doc = db.get(KnowledgeDocument, doc_id)
+                if doc is None or doc.project_id != pid:
+                    return {"ok": False, "error": f"资料 {doc_id} 不在项目 {pid} 里"}
+            else:
+                doc = (db.query(KnowledgeDocument)
+                       .filter(KnowledgeDocument.project_id == pid)
+                       .order_by(KnowledgeDocument.id.desc()).first())
+            if doc is None:
+                return {"ok": False,
+                        "error": "这个项目还没有上传任何资料：先把「相关人员说明/名单」传到资产库，我再来读"}
+            tasks = (db.query(Task)
+                     .filter(Task.project_id == pid, Task.status != "done")
+                     .order_by(Task.id).limit(40).all())
+            if not tasks:
+                return {"ok": False,
+                        "error": "这个项目还没有未完成的任务：先规划或创建任务，再来分配"}
+            members = member_service.list_members(db)
+            roster_line = "、".join(
+                f"{m.name}（{'已注册' if m.status == 'active' else '待认领'}）"
+                for m in members) or "（名册还是空的）"
+            task_lines = "\n".join(
+                f"#{t.id} {t.title}（优先级 {_PRI_CN.get(t.priority, t.priority)}）" for t in tasks)
+
+            try:
+                parsed, jerr = llm.chat_json([
+                    {"role": "system", "content":
+                     "你是小队的分工助手：根据【人员说明】把【未完成任务】分配给最合适的人。\n"
+                     "规则：\n"
+                     "1) 只能从【人员说明】里出现过的人里选，不要凭空造人；\n"
+                     "2) 负责人的职责/角色要跟任务匹配；实在匹配不上就别分配（宁缺毋滥）；\n"
+                     "3) 只输出 JSON 数组，每项形如 "
+                     "{\"task_id\": 数字, \"member_name\": \"人员说明里的名字\", \"reason\": \"不超过 20 字\"}；\n"
+                     "4) 同一个任务最多出现一次。"},
+                    {"role": "user", "content":
+                     f"【人员说明（来自资产库《{doc.title}》）】\n{self._roster_text(doc)}\n\n"
+                     f"【已在小队名册里的人】{roster_line}\n\n"
+                     f"【未完成任务】\n{task_lines}"},
+                ], temperature=0.2, max_tokens=1500)
+            except Exception as e:
+                return {"ok": False, "error": f"读名单失败：{e}"}
+            if jerr is not None:
+                return {"ok": False, "error": f"方案生成失败（模型输出无法解析：{jerr}）"}
+
+            items = self._normalize_assign_items(parsed, tasks, members)
+            if not items:
+                return {"ok": False,
+                        "error": "没能从这份资料里配出可用的分配（人名和任务对不上）：可以把名单写得更明确些，"
+                                 "或者直接说「把 #39 派给陈工」"}
+            titles = {t.id: t.title for t in tasks}
+            for it in items:
+                it["title"] = titles.get(it["task_id"], "")
+            run = AssignmentRun(project_id=pid, user_id=self.user_id, doc_id=doc.id,
+                                items=json.dumps(items, ensure_ascii=False), status="pending")
+            db.add(run)
+            db.commit()
+            db.refresh(run)
+            return {"ok": True, "data": items, "plan_id": run.id,
+                    "markdown": self._assign_markdown(run.id, doc.title, items),
+                    "note": "这是**待确认**的方案，还没写库；用户确认后再调 apply_assignment"}
+        finally:
+            db.close()
+
+    def apply_assignment(self, plan_id: Optional[int] = None,
+                         overrides: Optional[list] = None) -> dict:
+        """把待确认的方案落库：缺的人建占位成员，逐条写 assignee_id（D-017）。"""
+        db = SessionLocal()
+        try:
+            if plan_id:
+                run = db.get(AssignmentRun, plan_id)
+            else:
+                q = db.query(AssignmentRun).filter_by(user_id=self.user_id, status="pending")
+                if self.project_id is not None:
+                    q = q.filter(AssignmentRun.project_id == self.project_id)
+                run = q.order_by(AssignmentRun.id.desc()).first()
+            if run is None:
+                return {"ok": False, "error": "没有待确认的分配方案：先让我「按名单分配」一次"}
+            if run.status != "pending":
+                return {"ok": False, "error": f"方案 #{run.id} 已经落过库了"}
+            if self.project_id is not None and run.project_id != self.project_id:
+                return {"ok": False, "error": "这份方案不属于当前绑定的项目，已拒绝"}
+
+            items = json.loads(run.items or "[]")
+            fixed: dict[int, str] = {}
+            for ov in overrides or []:
+                if isinstance(ov, dict) and ov.get("task_id") is not None and ov.get("member_name"):
+                    try:
+                        fixed[int(ov["task_id"])] = str(ov["member_name"]).strip()
+                    except (TypeError, ValueError):
+                        continue
+
+            applied, skipped, created = [], [], []
+            for it in items:
+                task = db.get(Task, it.get("task_id"))
+                if task is None:
+                    skipped.append(f"#{it.get('task_id')}（任务已不存在）")
+                    continue
+                name = fixed.get(it["task_id"], it["member_name"])
+                hits = member_service.find_by_name(db, name)
+                if len(hits) > 1:
+                    skipped.append(f"「{task.title}」（「{name}」在名册里有 {len(hits)} 个人，重名没敢猜）")
+                    continue
+                if not hits:
+                    m = member_service.create_member(db, name)  # 占位成员（带邀请码）
+                    created.append({"name": m.name, "invite_code": m.invite_code})
+                else:
+                    m = hits[0]
+                task_service.update_task(db, task.id, assignee_id=m.id)
+                applied.append({"id": task.id, "title": task.title, "status": task.status,
+                                "assignee_id": m.id, "assignee_name": m.name})
+
+            run.status = "applied"
+            run.applied_count = len(applied)
+            db.commit()
+            return {"ok": True, "data": applied, "plan_id": run.id, "created_members": created,
+                    "skipped": skipped,
+                    "note": (f"已落库 {len(applied)} 条指派"
+                             + (f"，顺手建了 {len(created)} 个占位成员（带邀请码）" if created else "")
+                             + (f"；跳过 {len(skipped)} 条：{'；'.join(skipped)}" if skipped else "")
+                             + "；只改了负责人，任务状态没动")}
         finally:
             db.close()
 

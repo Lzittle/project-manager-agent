@@ -263,3 +263,23 @@ class PlanRun(Base):
     task_ids = Column(Text, default="[]")  # 本批次任务 id 的 JSON 数组（保序）
     task_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.now, index=True)
+
+
+class AssignmentRun(Base):
+    """分配方案批次表：Agent 读「相关人员说明」后拟出的「任务 → 负责人」方案。
+
+    为什么单独一张表：D-017 定了「先把方案给人过一眼、可微调，再落库」。
+    方案在确认前不能碰 tasks.assignee_id，所以先以 pending 状态存在这里；
+    用户确认（或有微调）后由 apply_assignment 逐条落库并置为 applied。
+    时间戳同样取 Python 侧 datetime.now()，与 PlanRun 保持同一时钟口径。
+    """
+    __tablename__ = "assignment_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    doc_id = Column(Integer, ForeignKey("knowledge_documents.id"), nullable=True)  # 读的是哪份资料
+    items = Column(Text, default="[]")  # [{"task_id","title","member_name","member_id","needs_create","ambiguous","reason"}]
+    status = Column(String(20), default="pending", index=True)  # pending=待确认 / applied=已落库
+    applied_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.now, index=True)

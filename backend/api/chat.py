@@ -49,6 +49,28 @@ def _format_plan_reply(res: dict, project_name: str | None) -> str:
     return f"已为「{name}」自动规划 {len(tasks)} 个任务：\n{lines}\n{note}"
 
 
+def _format_apply_reply(res: dict, project_name: str | None) -> str:
+    """把「方案落库」的结果拼成给用户的文字回复（不依赖模型二次生成）。"""
+    if not res.get("ok"):
+        return f"落库失败：{res.get('error', '未知错误')}"
+    rows = res.get("data") or []
+    name = project_name or "该项目"
+    lines = "\n".join(
+        f"{i}. {t['title']} → {t['assignee_name']}"
+        f"（状态仍为{_STATUS_CN.get(t['status'], t['status'])}）"
+        for i, t in enumerate(rows, 1))
+    out = f"已把「{name}」的 {len(rows)} 条指派落库：\n{lines}"
+    created = res.get("created_members") or []
+    if created:
+        who = "、".join(f"{c['name']}（邀请码 {c['invite_code']}）" for c in created)
+        out += f"\n顺手建了 {len(created)} 个占位成员：{who} —— 把邀请码发给对方，注册后即可认领。"
+    skipped = res.get("skipped") or []
+    if skipped:
+        out += f"\n{len(skipped)} 条没动：{'；'.join(skipped)}"
+    out += "\n只改了负责人，任务状态没有变化。"
+    return out
+
+
 def _format_snapshot_note(snap: dict) -> str:
     """把项目状态快照压成给模型的 system 上下文（真实数据，禁止编造）。"""
     d = snap.get("data", {})
@@ -191,6 +213,20 @@ def chat_send(body: ChatRequest, db: Session = Depends(get_db)):
             _ms = int((time.time() - _t0) * 1000)
             trace = [agent.executor.summarize_tool("plan_tasks", {}, res, _ms)]
             reply = _format_plan_reply(res, agent.executor.project_name)
+        elif action == "assign_plan":
+            # 按上传的名单/人员说明拟分配方案（不写库，D-017）
+            _t0 = time.time()
+            res = agent.executor.plan_assignment_from_doc()
+            _ms = int((time.time() - _t0) * 1000)
+            trace = [agent.executor.summarize_tool("plan_assignment_from_doc", {}, res, _ms)]
+            reply = res.get("markdown") or f"没能拟出分配方案：{res.get('error', '未知错误')}"
+        elif action == "apply":
+            # 用户确认后才落库（只在存在待确认方案时才会走到这里）
+            _t0 = time.time()
+            res = agent.executor.apply_assignment()
+            _ms = int((time.time() - _t0) * 1000)
+            trace = [agent.executor.summarize_tool("apply_assignment", {}, res, _ms)]
+            reply = _format_apply_reply(res, agent.executor.project_name)
         elif action == "query":
             # 只读进度查询：代码层先读真实项目状态注入上下文，
             # 模型只能基于数据作答——杜绝「不查库直接泛泛而谈/编造进度」。
