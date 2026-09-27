@@ -116,28 +116,11 @@
 
         <!-- 小队成员名册：占位成员（还没注册的人）也能被指派，邀请码发给对方认领 -->
         <div class="ws-group">小队成员 · 名册</div>
-        <div class="ws-roster">
-          <div v-for="m in members" :key="m.id" class="ws-member" :class="{ wait: m.status !== 'active' }">
-            <span class="ws-pava" :class="{ empty: m.status !== 'active' }">{{ m.name.slice(-1) }}</span>
-            <span class="ws-mname">{{ m.name }}</span>
-            <span v-if="m.status !== 'active'" class="ws-code">{{ m.invite_code }}</span>
-            <span class="ws-tag" :class="m.status === 'active' ? 'ok' : 'wait'">
-              {{ m.status === 'active' ? '已注册' : '待认领' }}
-            </span>
-          </div>
-          <div v-if="!members.length" class="ws-empty-small">还没有成员，手填一个名字就能开始指派。</div>
-          <div class="ws-addmember">
-            <input
-              v-model="newMemberName"
-              class="ws-minput"
-              type="text"
-              placeholder="手填名字…"
-              aria-label="手填成员名字"
-              @keydown.enter="addRosterMember"
-            />
-            <button class="ws-btn" type="button" @click="addRosterMember">出邀请码</button>
-          </div>
-        </div>
+        <MemberRoster
+          :members="members"
+          v-model:name="newMemberName"
+          @add="addRosterMember"
+        />
 
         <div class="ws-preview">
           <div class="ws-preview-head">{{ picked ? picked.name : '点左侧任意一项' }}</div>
@@ -150,202 +133,55 @@
       </aside>
 
       <!-- ===== 中：对话（居中） ===== -->
-      <section class="ws-chat">
-        <div class="ws-thin">
-          <div ref="threadEl" class="ws-thread">
-            <div v-if="!messages.length" class="ws-hello">
-              <p class="ws-hello-title">我是 Squad。说一句你想推进的事，我会拆成任务放到右边的现场里。</p>
-              <div class="ws-suggest">
-                <button class="ws-act" type="button" @click="send('帮我规划几项任务')">帮我规划几项任务</button>
-                <button class="ws-act" type="button" @click="send('现在有哪些任务？')">现在有哪些任务？</button>
-              </div>
-            </div>
-            <ChatMessage
-              v-for="(m, i) in messages"
-              :key="i"
-              :role="m.role"
-              :content="m.content"
-              :trace="m.trace"
-              @goto="onGoToRef"
-            />
-            <div v-if="sending" class="ws-typing">正在思考并调用工具…</div>
-          </div>
-
-          <div class="ws-composer">
-            <textarea
-              v-model="draft"
-              class="ws-input"
-              rows="1"
-              placeholder="说一句要干什么…（Enter 发送，Shift+Enter 换行）"
-              @keydown.enter.exact.prevent="send()"
-            />
-            <div class="ws-sendrow">
-              <span class="ws-note">对话产出的任务会直接落到右边的现场</span>
-              <button class="ws-send" type="button" :disabled="sending || !draft.trim()" @click="send()">发送</button>
-            </div>
-          </div>
-        </div>
-      </section>
+      <ChatPanel
+        ref="chatRef"
+        v-model:draft="draft"
+        :messages="messages"
+        :sending="sending"
+        @send="send"
+        @goto="onGoToRef"
+      />
 
       <!-- ===== 右：现场（预览 → 全屏） ===== -->
-      <aside v-show="liveOpen" class="ws-live" :class="{ 'is-full': liveFull }" aria-label="现场">
-        <div class="ws-livehead">
-          <div class="ws-livetitle">
-            <b>{{ scope === 'me' ? '我的任务' : '现场 · ' + (store.current ? store.current.name : '全局') }}</b>
-            <span>{{ liveSummary }}</span>
-          </div>
-          <div class="ws-liveacts">
-            <span class="ws-follow"><i class="ws-followdot" aria-hidden="true"></i>跟随对话</span>
-            <button class="ws-btn" type="button" @click="liveFull = !liveFull">
-              {{ liveFull ? '退出全屏' : '全屏' }}
-            </button>
-          </div>
-        </div>
-
-        <div v-if="scope === 'team' && store.currentId" class="ws-filters" role="group" aria-label="任务筛选">
-          <button
-            v-for="f in filters"
-            :key="f.key"
-            class="ws-chip"
-            :class="{ on: filter === f.key }"
-            type="button"
-            @click="filter = f.key"
-          >{{ f.label }}</button>
-        </div>
-
-        <!-- 我的任务：跨项目 -->
-        <template v-if="scope === 'me'">
-          <div v-for="group in myGroups" :key="group.project" class="ws-mygroup">
-            <div class="ws-myproj">{{ group.project }}</div>
-            <div v-for="t in group.tasks" :key="t.id" class="ws-myitem">
-              <b>{{ t.title }}</b>
-              <span>{{ statusOf(t).label }}</span>
-            </div>
-          </div>
-          <div v-if="!myGroups.length" class="ws-empty-small">当前没有派给 {{ meName }} 的任务。</div>
-        </template>
-
-        <!-- 全队：预览（默认）或看板（全屏） -->
-        <template v-else>
-          <!-- 全局：各项目任务分布（队长视野），点一行进入那个项目 -->
-          <div v-if="!store.currentId">
-            <div class="ws-empty-small">还没绑定项目。下面是全队的任务分布，点一行进入那个项目。</div>
-            <button
-              v-for="p in overview"
-              :key="p.id"
-              class="ws-row"
-              type="button"
-              @click="store.setCurrent(p.id)"
-            >
-              <span class="ws-rowmain">
-                <span class="ws-rowtitle">{{ p.name }}</span>
-                <span class="ws-rowmeta">{{ p.total }} 条任务 · 进行中 {{ p.doing }}<template v-if="p.blocked"> · 待解锁 {{ p.blocked }}</template></span>
-              </span>
-              <span class="ws-arrow">›</span>
-            </button>
-            <div v-if="!overview.length" class="ws-empty-small">还没有项目。</div>
-          </div>
-          <div v-else-if="!visibleTasks.length" class="ws-empty-small">
-            这个项目还没有任务，跟左边说一句就会长出来。
-          </div>
-          <div v-else-if="!liveFull" class="ws-preview-list">
-            <button
-              v-for="t in visibleTasks.slice(0, 4)"
-              :key="t.id"
-              class="ws-row"
-              type="button"
-              @click="liveFull = true"
-            >
-              <i class="ws-dot" :class="dotClass(t)" aria-hidden="true" />
-              <span class="ws-rowmain">
-                <span class="ws-rowtitle">{{ t.title }}</span>
-                <span v-if="isBlocked(t)" class="ws-rowwarn">待解锁</span>
-              </span>
-              <span v-if="isFresh(t)" class="ws-fresh">新</span>
-              <span class="ws-pava" :class="{ empty: !t.assignee_name }">{{ t.assignee_name ? t.assignee_name.slice(-1) : '+' }}</span>
-            </button>
-            <div v-if="visibleTasks.length > 4" class="ws-more">
-              还有 {{ visibleTasks.length - 4 }} 条，点开看全部
-            </div>
-            <div class="ws-hint">点上面任意一条 → 展开成全屏看板</div>
-          </div>
-          <div v-else class="ws-board" :class="{ one: filter !== 'all' }">
-            <section v-for="col in visibleColumns" :key="col.key" class="ws-col" :class="'ws-col-' + col.key">
-              <div class="ws-colhead">
-                <i class="ws-dot" :class="col.dot" aria-hidden="true" />
-                <span>{{ col.label }}</span>
-                <b>{{ col.tasks.length }}</b>
-              </div>
-              <article
-                v-for="t in col.tasks"
-                :key="t.id"
-                class="ws-card"
-                :class="{ locked: isBlocked(t) }"
-              >
-                <span class="ws-pri" :class="t.priority">{{ priText(t.priority) }}</span>
-                <h4>{{ t.title }}</h4>
-                <div v-if="isBlocked(t)" class="ws-cardnote">被前置任务卡住，前置完成后可开工</div>
-                <div class="ws-cardfoot">
-                  <button
-                    class="ws-whochip"
-                    :class="{ empty: !t.assignee_name }"
-                    type="button"
-                    :aria-expanded="assignFor === t.id"
-                    :aria-label="t.assignee_name ? '改派「' + t.title + '」' : '给「' + t.title + '」指派负责人'"
-                    @click="toggleAssign(t)"
-                  >
-                    <span class="ws-pava" :class="{ empty: !t.assignee_name }">{{ t.assignee_name ? t.assignee_name.slice(-1) : '+' }}</span>
-                    <span class="ws-who">{{ t.assignee_name || '指派' }}</span>
-                  </button>
-                  <span v-if="isFresh(t)" class="ws-fresh">新</span>
-
-                  <!-- 就地选人：不弹模态、不跳页（D-007） -->
-                  <div v-if="assignFor === t.id" class="ws-pop" role="dialog" aria-label="指派给谁">
-                    <div class="ws-pophead"><b>指派给谁？</b><span>选名册里的人</span></div>
-                    <button
-                      v-for="m in members"
-                      :key="m.id"
-                      class="ws-poprow"
-                      type="button"
-                      @click="assignTo(t, m)"
-                    >
-                      <span class="ws-pava" :class="{ empty: m.status !== 'active' }">{{ m.name.slice(-1) }}</span>
-                      <span class="ws-popname">{{ m.name }}</span>
-                      <span v-if="m.status !== 'active'" class="ws-code">{{ m.invite_code }}</span>
-                      <span class="ws-tag" :class="m.status === 'active' ? 'ok' : 'wait'">
-                        {{ m.status === 'active' ? '已注册' : '待认领' }}
-                      </span>
-                    </button>
-                    <div v-if="!members.length" class="ws-empty-small">名册还是空的，在下面填个名字。</div>
-                    <div class="ws-popnew">
-                      <input
-                        v-model="assignNewName"
-                        class="ws-minput"
-                        type="text"
-                        placeholder="新成员名字…"
-                        aria-label="新成员名字"
-                        @keydown.enter="addMemberAndAssign(t)"
-                      />
-                      <button class="ws-btn solid" type="button" @click="addMemberAndAssign(t)">新建并指派</button>
-                    </div>
-                    <p class="ws-popfoot">新建的是占位身份（带邀请码），对方注册后认领；指派不改任务状态。</p>
-                  </div>
-                </div>
-              </article>
-            </section>
-          </div>
-        </template>
-      </aside>
+      <LivePanel
+        v-show="liveOpen"
+        :scope="scope"
+        :live-full="liveFull"
+        :filter="filter"
+        :project-name="store.current ? store.current.name : ''"
+        :has-project="!!store.currentId"
+        :summary="liveSummary"
+        :me-name="meName"
+        :overview="overview"
+        :visible-tasks="visibleTasks"
+        :visible-columns="visibleColumns"
+        :my-groups="myGroups"
+        :members="members"
+        :assign-for="assignFor"
+        :assign-name="assignNewName"
+        @update:live-full="liveFull = $event"
+        @update:filter="filter = $event"
+        @update:assign-name="assignNewName = $event"
+        @open-project="store.setCurrent($event)"
+        @toggle-assign="toggleAssign"
+        @assign="onAssign"
+        @create-assign="onCreateAssign"
+      />
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { chatApi, knowledgeApi, memberApi, taskApi, USER_ID } from '../api'
 import { useProjectStore } from '../stores/project'
-import ChatMessage from '../components/ChatMessage.vue'
+// 工作台按组件拆开（D-026）：常量与纯函数在 workspace/constants.js，四个组件各管一块
+import ChatPanel from '../components/workspace/ChatPanel.vue'
+import LivePanel from '../components/workspace/LivePanel.vue'
+import MemberRoster from '../components/workspace/MemberRoster.vue'
+import { DOC_PREVIEW_CHARS, FONT_SCALES, STATUS, isBlocked, repoDocs }
+  from '../components/workspace/constants.js'
 
 const store = useProjectStore()
 
@@ -361,11 +197,6 @@ const liveOpen = ref(true)
 const liveFull = ref(false)
 
 // 字号三档：改的是 html 的 font-size，全站 rem 字号跟着缩放，档位记在本地
-const FONT_SCALES = [
-  { key: 'small', label: '小', root: '93.75%' },
-  { key: 'normal', label: '标准', root: '100%' },
-  { key: 'large', label: '大', root: '112.5%' },
-]
 const fontIndex = ref(1)
 const fontLabel = computed(() => FONT_SCALES[fontIndex.value].label)
 
@@ -381,13 +212,6 @@ function cycleFont() {
   applyFontScale((fontIndex.value + 1) % FONT_SCALES.length)
 }
 
-// 「新」= 24 小时内创建的任务：第 4 个软色块（rose）只用于这种瞬时变化
-function isFresh(t) {
-  if (!t.created_at) return false
-  const ms = Date.now() - new Date(t.created_at).getTime()
-  return ms >= 0 && ms < 24 * 60 * 60 * 1000
-}
-
 const messages = ref([])
 const draft = ref('')
 const sending = ref(false)
@@ -396,41 +220,7 @@ const mineTasks = ref([])           // 我的任务（跨项目）
 const documents = ref([])
 const picked = ref(null)
 const overview = ref([])            // 全局范围：各项目任务概览（队长视野）
-const threadEl = ref(null)
-
-const repoDocs = [
-  { name: 'PLAN.md', note: '要什么', text: '仓库根目录 · 唯一事实源：做什么、不做什么、验收标准。Agent 每次对话自动读它。' },
-  { name: 'DECISIONS.md', note: '为什么', text: '仓库根目录 · 已经定过的决策与踩过的坑，只追加不改。指派不改变状态就是 D-005。' },
-  { name: 'docs/WORKFLOW.md', note: '怎么干', text: 'docs/ 下 · 每轮节奏：产出 → 人拍板 → 落盘。一轮只推进一个能验证的小步。' },
-]
-
-const DOC_PREVIEW_CHARS = 1500  // 资产库预览最多渲染多少字（超出部分靠框内滚动）
-
-const filters = [
-  { key: 'all', label: '全部' },
-  { key: 'todo', label: '未开始' },
-  { key: 'doing', label: '进行中' },
-]
-
-const STATUS = {
-  todo: { label: '待办', dot: 'todo', col: '待办' },
-  doing: { label: '进行中', dot: 'doing', col: '进行中' },
-  done: { label: '已完成', dot: 'done', col: '已完成' },
-}
-
-function statusOf(t) {
-  return STATUS[t.status] || { label: t.status, dot: 'todo', col: t.status }
-}
-function isBlocked(t) {
-  return t.status !== 'done' && (t.blocked_by_count || 0) > 0
-}
-function dotClass(t) {
-  if (isBlocked(t)) return 'lock'
-  return statusOf(t).dot
-}
-function priText(p) {
-  return { high: '高', medium: '中', low: '低' }[p] || p || '中'
-}
+const chatRef = ref(null)   // 对话组件：滚动由它自己管，父组件只在需要时喊一声
 
 const ancestors = computed(() => {
   const chain = []
@@ -546,6 +336,15 @@ function toggleAssign(t) {
   assignNewName.value = ''
 }
 
+// 看板卡把事件抛上来（D-026 拆组件后）：这里把"哪张卡"补回去再走原逻辑
+async function onAssign({ task, member }) {
+  await assignTo(task, member)
+}
+
+async function onCreateAssign({ task }) {
+  await addMemberAndAssign(task)
+}
+
 async function assignTo(t, m) {
   if (assignBusy.value) return
   assignBusy.value = true
@@ -650,9 +449,7 @@ function pickDocument(doc) {
 
 // ---------- 对话 ----------
 function scrollThread() {
-  nextTick(() => {
-    if (threadEl.value) threadEl.value.scrollTop = threadEl.value.scrollHeight
-  })
+  chatRef.value?.scrollToBottom()   // 滚动归 ChatPanel 管（D-014：只有对话区滚）
 }
 
 async function send(text) {
@@ -695,350 +492,6 @@ onMounted(async () => {
 watch(() => store.currentId, () => { reloadAll() })
 </script>
 
-<style scoped>
-/* 新工作台：一个界面、两个投影。设计规则见仓库 DECISIONS.md（D-001 / D-006） */
-.ws {
-  /* 一律引用 theme.css 的设计令牌 v5；组件里不写死颜色与字号 */
-  --ws-bg: var(--p-surface);
-  --ws-surface: var(--p-surface);
-  --ws-surface2: var(--p-canvas);
-  --ws-line: var(--p-line);
-  --ws-line2: var(--p-line-soft);
-  --ws-fg: var(--p-ink);
-  --ws-fg2: var(--p-ink-2);
-  --ws-fg3: var(--p-ink-2);
-  --ws-idle: var(--p-idle);
-  --ws-accent: var(--p-brand);
-  --ws-accent-strong: var(--p-brand-strong);
-  --ws-accent-wash: var(--p-brand-wash);
-  --ws-accent-line: var(--p-brand-line);
-  --ws-mint: var(--p-block-mint);
-  --ws-on-mint: var(--p-on-mint);
-  --ws-peach: var(--p-block-peach);
-  --ws-on-peach: var(--p-on-peach);
-  --ws-sand: var(--p-block-sand);
-  --ws-on-sand: var(--p-on-sand);
-  --ws-rose: var(--p-block-rose);
-  --ws-on-rose: var(--p-on-rose);
-  --ws-plain: var(--p-block-plain);
-  --ws-danger: var(--p-danger);
-  --ws-radius: var(--p-r-sm);
-  --ws-radius-sm: var(--p-r-sm);
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: var(--ws-bg);
-  color: var(--ws-fg);
-  font-size: var(--p-fs-ui);
-  line-height: var(--p-lh-ui);
-}
 
-/* 键盘可达：焦点一律用主色描边，不靠加深底色 */
-.ws :is(button, textarea, [tabindex]):focus-visible {
-  outline: 2px solid var(--ws-accent);
-  outline-offset: 2px;
-}
-
-/* ---------- 顶栏 ---------- */
-.ws-top {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  padding: 9px 16px;
-  border-bottom: 1px solid var(--ws-line);
-  background: var(--ws-surface);
-}
-.ws-brand { display: flex; align-items: center; gap: 9px; }
-.ws-logo {
-  width: 26px; height: 26px;
-  border-radius: var(--ws-radius-sm);
-  background: var(--ws-accent);
-  color: #fff;
-  display: flex; align-items: center; justify-content: center;
-}
-.ws-brandtext { display: flex; flex-direction: column; line-height: 1.15; }
-.ws-brandtext b { font-weight: 600; font-size: var(--p-fs-title); letter-spacing: 0.01em; }
-.ws-brandtext i { font-style: normal; font-size: var(--p-fs-eyebrow); letter-spacing: 1.6px; color: var(--ws-fg3); }
-.ws-scopes, .ws-panels { display: flex; gap: 4px; }
-.ws-fontbtn { font-variant-numeric: tabular-nums; }
-.ws-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.ws-chip {
-  font: inherit;
-  font-size: var(--p-fs-meta);
-  color: var(--ws-fg2);
-  background: var(--ws-surface);
-  border: 1px solid var(--ws-line);
-  border-radius: 999px;
-  padding: 3px 11px;
-  cursor: pointer;
-}
-.ws-chip:hover { border-color: var(--ws-fg3); }
-.ws-chip.on { color: var(--ws-accent); border-color: var(--ws-accent-line); background: var(--ws-accent-wash); font-weight: 600; }
-.ws-crumbs { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-.ws-crumb { font-size: var(--p-fs-meta); color: var(--ws-fg3); }
-.ws-sep { margin-left: 7px; color: var(--ws-line); }
-.ws-crumbon {
-  font-size: var(--p-fs-ui); font-weight: 600; color: var(--ws-fg);
-  padding: 3px 8px; border: 1px solid var(--ws-line);
-  border-radius: var(--ws-radius-sm); background: var(--ws-surface2);
-}
-.ws-pick { width: 150px; }
-.ws-avatar {
-  margin-left: auto;
-  width: 24px; height: 24px; border-radius: 50%;
-  background: var(--ws-accent); color: #fff;
-  display: inline-flex; align-items: center; justify-content: center;
-  font-size: var(--p-fs-meta);
-}
-
-/* ---------- 主体 ---------- */
-.ws-main { flex: 1; min-height: 0; display: flex; align-items: stretch; }
-
-/* 左：资产库 */
-.ws-assets {
-  flex: 0 0 280px;
-  min-width: 0;
-  padding: 14px;
-  border-right: 1px solid var(--ws-line);
-  background: var(--ws-surface2);
-  overflow-y: auto;
-}
-.ws-ashead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.ws-ashead b { font-weight: 600; }
-.ws-ashead span { font-size: var(--p-fs-tag); color: var(--ws-fg3); }
-.ws-group { font-size: var(--p-fs-eyebrow); letter-spacing: 0.1em; color: var(--ws-fg3); margin: 14px 0 4px; }
-.ws-file {
-  display: flex; align-items: center; gap: 7px;
-  width: 100%; font: inherit; text-align: left;
-  padding: 7px 8px; border: 1px solid transparent;
-  border-radius: var(--ws-radius-sm); background: transparent;
-  color: var(--ws-fg); cursor: pointer;
-}
-.ws-file:hover { background: var(--ws-surface); }
-.ws-file.on { background: var(--ws-surface); border-color: var(--ws-line); }
-.ws-mark { width: 8px; height: 8px; border-radius: 50%; background: var(--ws-accent-wash); border: 1px solid var(--ws-accent-line); flex-shrink: 0; }
-.ws-filename { flex: 1; min-width: 0; font-size: var(--p-fs-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ws-filenote { font-size: var(--p-fs-tag); color: var(--ws-fg3); white-space: nowrap; }
-.ws-preview { margin-top: 14px; padding: 10px 11px; border: 1px solid var(--ws-line); border-radius: var(--ws-radius); background: var(--ws-surface); }
-.ws-preview-head { font-size: var(--p-fs-tag); color: var(--ws-fg3); margin-bottom: 5px; }
-.ws-preview p { margin: 0; font-size: var(--p-fs-meta); color: var(--ws-fg2); line-height: var(--p-lh-ui); }
-/* 项目记忆正文预览：侧栏窄，正文框内部滚动，不把左栏整体撑长（保住 D-014 的"只有该滚的地方滚"） */
-.ws-preview-body {
-  margin-top: 8px; padding-top: 8px;
-  border-top: 1px solid var(--ws-line2);
-  max-height: 38vh; overflow-y: auto; overscroll-behavior: contain;
-  font-size: var(--p-fs-meta); color: var(--ws-fg2); line-height: var(--p-lh-ui);
-  white-space: pre-wrap; word-break: break-word;
-}
-.ws-preview .ws-preview-foot { margin-top: 6px; font-size: var(--p-fs-tag); color: var(--ws-fg3); }
-
-/* 中：对话 */
-.ws-chat { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-/* 中列必须能一路收缩：只有对话区滚动，输入框永远留在视口里 */
-.ws-thin {
-  display: flex; flex-direction: column;
-  flex: 1 1 auto; min-height: 0; min-width: 0;
-  width: 100%;
-  /* 阅读宽度用 rem + vw 双重约束：字号调大时列宽跟着大（每行字数不变），
-     窗口变宽时也会长，但始终不超过 50rem，避免行长失控 */
-  max-width: min(100%, clamp(34rem, 52vw, 50rem));
-  margin: 0 auto;
-}
-.ws-thread { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px; }
-.ws-hello-title { margin: 0 0 10px; font-size: var(--p-fs-body); line-height: var(--p-lh-read); color: var(--ws-fg2); }
-.ws-suggest { display: flex; flex-wrap: wrap; gap: 6px; }
-.ws-act {
-  font: inherit; font-size: var(--p-fs-meta); cursor: pointer;
-  padding: 4px 10px; border: 1px solid var(--ws-line);
-  border-radius: var(--ws-radius-sm); background: var(--ws-surface); color: var(--ws-fg2);
-}
-.ws-typing { color: var(--ws-fg3); font-size: var(--p-fs-meta); }
-.ws-composer { flex: 0 0 auto; border-top: 1px solid var(--ws-line); padding: 12px 16px 14px; }
-.ws-input {
-  display: block; width: 100%; box-sizing: border-box;
-  font: inherit; font-size: var(--p-fs-body); color: var(--ws-fg);
-  padding: 9px 11px; border: 1px solid var(--ws-line);
-  border-radius: var(--ws-radius-sm); background: var(--ws-surface);
-  resize: none;
-}
-.ws-input::placeholder { color: var(--ws-fg3); }
-.ws-sendrow { display: flex; align-items: center; gap: 10px; margin-top: 9px; }
-.ws-note { font-size: var(--p-fs-tag); color: var(--ws-fg3); }
-.ws-send {
-  margin-left: auto; font: inherit; font-size: var(--p-fs-ui); font-weight: 600;
-  color: #fff; background: var(--ws-accent); border: 1px solid var(--ws-accent);
-  border-radius: var(--ws-radius-sm); padding: 6px 18px; cursor: pointer;
-}
-.ws-send[disabled] { opacity: 0.5; cursor: default; }
-.ws-send:not([disabled]):hover { background: var(--ws-accent-strong); border-color: var(--ws-accent-strong); }
-
-/* 右：现场 */
-.ws-live {
-  flex: 0 0 300px;
-  min-width: 0;
-  padding: 14px;
-  border-left: 1px solid var(--ws-line);
-  background: var(--ws-surface2);
-  overflow-y: auto;
-  transition: flex-basis 0.22s ease;
-}
-.ws-main.is-full .ws-assets,
-.ws-main.is-full .ws-chat { display: none; }
-.ws-main.is-full .ws-live { flex: 0 0 100%; max-width: 100%; background: var(--ws-surface); }
-.ws-livehead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
-.ws-livetitle { display: flex; flex-direction: column; min-width: 0; }
-.ws-livetitle b { font-weight: 600; font-size: var(--p-fs-title); }
-.ws-livetitle span { font-size: var(--p-fs-meta); color: var(--ws-fg3); }
-.ws-liveacts { display: flex; align-items: center; gap: 6px; }
-.ws-follow { display: inline-flex; align-items: center; gap: 6px; font-size: var(--p-fs-tag); color: var(--ws-fg2); white-space: nowrap; }
-.ws-followdot { width: 6px; height: 6px; border-radius: 50%; background: var(--ws-accent); }
-.ws-btn {
-  font: inherit;
-  font-size: var(--p-fs-tag);
-  color: var(--ws-fg2);
-  background: var(--ws-surface);
-  border: 1px solid var(--ws-line);
-  border-radius: var(--ws-radius-sm);
-  padding: 3px 10px;
-  cursor: pointer;
-}
-.ws-btn:hover { color: var(--ws-fg); border-color: var(--ws-idle); }
-.ws-filters { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 10px; }
-.ws-filters .ws-chip { font-size: var(--p-fs-tag); padding: 3px 10px; }
-.ws-preview-list { display: flex; flex-direction: column; }
-.ws-row {
-  display: flex; align-items: center; gap: 8px;
-  width: 100%; font: inherit; text-align: left;
-  padding: 8px 2px; border: 0; border-top: 1px solid var(--ws-line2);
-  background: transparent; color: var(--ws-fg); cursor: pointer;
-}
-.ws-row:first-child { border-top: 0; }
-.ws-row:hover { background: var(--ws-plain); }
-.ws-rowmain { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.ws-rowtitle { font-size: var(--p-fs-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ws-rowwarn { font-size: var(--p-fs-tag); color: var(--ws-on-peach); }
-.ws-rowmeta { font-size: var(--p-fs-tag); color: var(--ws-fg3); }
-.ws-arrow { color: var(--ws-fg3); }
-.ws-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--p-idle); flex-shrink: 0; }
-.ws-dot.doing { background: var(--ws-accent); }
-.ws-dot.done { background: var(--p-ok); }
-.ws-dot.lock { background: var(--ws-on-peach); }
-.ws-pava {
-  width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  font-size: var(--p-fs-tag); color: var(--ws-accent);
-  background: var(--ws-accent-wash); border: 1px solid var(--ws-accent-line);
-}
-.ws-pava.empty { background: transparent; border: 1px dashed var(--ws-line); color: var(--ws-fg3); }
-.ws-fresh {
-  font-size: var(--p-fs-eyebrow);
-  color: var(--ws-on-rose);
-  background: var(--ws-rose);
-  border-radius: var(--p-r-xs);
-  padding: 1px 6px;
-  white-space: nowrap;
-}
-.ws-more, .ws-hint, .ws-empty-small { font-size: var(--p-fs-meta); color: var(--ws-fg3); padding-top: 8px; }
-
-/* 全屏看板 */
-.ws-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.ws-board.one { grid-template-columns: 1fr; }
-.ws-col {
-  display: flex; flex-direction: column; gap: 8px;
-  padding: 10px; border: 1px solid var(--ws-line);
-  border-radius: var(--ws-radius); background: var(--ws-surface);
-  min-height: 200px;
-}
-.ws-colhead {
-  display: flex; align-items: center; gap: 6px;
-  font-size: var(--p-fs-meta); color: var(--ws-fg2);
-  padding: 5px 8px; border-radius: var(--ws-radius-sm);
-}
-.ws-colhead b { margin-left: auto; font-weight: 600; color: var(--ws-fg3); font-variant-numeric: tabular-nums; }
-.ws-col-doing > .ws-colhead { background: var(--ws-mint); color: var(--ws-on-mint); }
-.ws-col-doing > .ws-colhead b { color: var(--ws-on-mint); }
-.ws-col-done > .ws-colhead { background: var(--ws-sand); color: var(--ws-on-sand); }
-.ws-col-done > .ws-colhead b { color: var(--ws-on-sand); }
-.ws-card { position: relative; padding: 9px 10px; border: 1px solid var(--ws-line2); border-radius: var(--ws-radius-sm); background: var(--ws-surface); }
-.ws-card.locked { background: var(--ws-peach); border-color: var(--ws-peach); }
-.ws-card h4 { margin: 6px 0 7px; font-size: var(--p-fs-ui); font-weight: 500; line-height: var(--p-lh-tight); }
-.ws-cardnote { font-size: var(--p-fs-tag); color: var(--ws-on-peach); margin-bottom: 7px; }
-.ws-cardfoot { display: flex; align-items: center; gap: 6px; }
-.ws-who { font-size: var(--p-fs-tag); color: var(--ws-fg3); }
-.ws-pri { display: inline-block; font-size: var(--p-fs-eyebrow); letter-spacing: 0.04em; color: var(--ws-fg2); }
-.ws-pri.high { color: var(--ws-danger); font-weight: 600; }
-.ws-pri.medium, .ws-pri.low { color: var(--ws-fg2); }
-
-/* ---------- 小队成员名册 + 指派浮层（D-017 / D-018） ---------- */
-.ws-roster { border: 1px solid var(--ws-accent-line); border-radius: var(--ws-radius-sm); background: var(--ws-surface); padding: 8px; }
-.ws-member { display: flex; align-items: center; gap: 7px; padding: 3px 2px; font-size: var(--p-fs-ui); }
-.ws-member .ws-mname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ws-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--p-fs-eyebrow); color: var(--ws-fg3); }
-.ws-tag { font-size: var(--p-fs-eyebrow); border-radius: var(--p-r-xs); padding: 1px 6px; white-space: nowrap; }
-.ws-tag.ok { color: var(--ws-on-mint); background: var(--ws-mint); }
-.ws-tag.wait { color: var(--ws-on-peach); background: var(--ws-peach); }
-.ws-addmember { display: flex; gap: 6px; margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--ws-line2); }
-.ws-minput {
-  flex: 1; min-width: 0; font: inherit; font-size: var(--p-fs-ui); color: var(--ws-fg);
-  padding: 4px 8px; border: 1px solid var(--ws-line); border-radius: var(--ws-radius-sm);
-  background: var(--ws-surface);
-}
-.ws-minput::placeholder { color: var(--ws-fg3); }
-.ws-btn.solid { color: #fff; background: var(--ws-accent); border-color: var(--ws-accent); font-weight: 600; }
-.ws-btn.solid:hover { color: #fff; background: var(--ws-accent-strong); border-color: var(--ws-accent-strong); }
-
-.ws-memberbtn { position: relative; }
-.ws-memberchip { display: none; }
-.ws-whochip {
-  display: inline-flex; align-items: center; gap: 6px; font: inherit;
-  padding: 2px 8px 2px 3px; border: 1px solid var(--ws-line); border-radius: 999px;
-  background: var(--ws-surface); color: var(--ws-fg2); cursor: pointer;
-}
-.ws-whochip:hover { border-color: var(--ws-accent-line); background: var(--ws-accent-wash); }
-.ws-whochip.empty { border-style: dashed; color: var(--ws-fg3); padding: 2px 9px; }
-.ws-pop {
-  position: absolute; z-index: 5; top: calc(100% + 5px); left: 0;
-  width: 236px; max-width: 100%;
-  padding: 8px; text-align: left;
-  background: var(--ws-surface); border: 1px solid var(--ws-line);
-  border-radius: var(--p-r-lg); box-shadow: var(--el-box-shadow-dark);
-}
-.ws-pophead { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; padding: 2px 4px 6px; }
-.ws-pophead b { font-size: var(--p-fs-ui); font-weight: 600; }
-.ws-pophead span { font-size: var(--p-fs-tag); color: var(--ws-fg3); }
-.ws-poprow {
-  display: flex; align-items: center; gap: 7px; width: 100%; font: inherit;
-  padding: 5px 6px; border: 0; border-radius: var(--ws-radius-sm);
-  background: transparent; color: var(--ws-fg); text-align: left; cursor: pointer;
-}
-.ws-poprow:hover { background: var(--ws-plain); }
-.ws-poprow.static { cursor: default; }
-.ws-poprow.static:hover { background: transparent; }
-.ws-poprow .ws-popname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ws-popnew { display: flex; gap: 6px; margin-top: 5px; padding-top: 8px; border-top: 1px solid var(--ws-line2); }
-.ws-popfoot { margin: 8px 2px 0; font-size: var(--p-fs-tag); color: var(--ws-fg3); line-height: var(--p-lh-ui); }
-.ws-poptop { top: calc(100% + 6px); }
-
-/* 我的任务 */
-.ws-mygroup { margin-bottom: 12px; }
-.ws-myproj { font-size: var(--p-fs-tag); color: var(--ws-fg3); margin-bottom: 5px; }
-.ws-myitem {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 9px 10px; margin-bottom: 6px;
-  border: 1px solid var(--ws-line); border-radius: var(--ws-radius);
-  background: var(--ws-surface);
-}
-.ws-myitem b { font-weight: 500; font-size: var(--p-fs-ui); }
-.ws-myitem span { font-size: var(--p-fs-tag); color: var(--ws-fg3); white-space: nowrap; }
-
-@media (prefers-reduced-motion: reduce) {
-  .ws-live { transition: none; }
-}
-@media (max-width: 900px) {
-  .ws-assets { display: none; }
-  .ws-memberchip { display: inline-block; }
-  .ws-live { flex: 0 0 46%; }
-  .ws-board { grid-template-columns: 1fr; }
-}
-</style>
+<!-- 样式已整块搬到 src/assets/workspace.css（D-026）：拆组件后父组件的 scoped
+     样式碰不到子组件内部，而这些类名都以 .ws- 前缀命名空间化，放全局是安全的。 -->

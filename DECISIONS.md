@@ -339,3 +339,39 @@
 （agent=43 / query=14 / plan=2 / conflict=2 / ask=2 / assign_plan=1 / apply=1）；
 真模型烟测三条（指派 `m01`、确认落库 `a02`、进度查询 `q01`）各 1/1 通过；
 结构核对 1241/1241 行零丢失。
+
+## D-026 · 2026-09-27 · 前端工作台按组件拆（Workspace.vue 1029 → 483 行）
+
+**决策**：
+
+1. `frontend/src/views/Workspace.vue` 从 1029 行拆到 **483 行**，新增 5 个文件（都在 `src/components/workspace/`）：
+
+   | 文件 | 行数 | 职责 | 对外接口（props / emits） |
+   |---|---|---|---|
+   | `LivePanel.vue` | 131 | 现场（预览 → 全屏看板 / 我的任务 / 全局分布） | props：scope/liveFull/filter/projectName/hasProject/summary/meName/overview/visibleTasks/visibleColumns/myGroups/members/assignFor/assignName；emits：update:liveFull、update:filter、update:assignName、open-project、toggle-assign、assign、create-assign |
+   | `BoardCard.vue` | 67 | 任务卡 + 就地指派浮层（D-007） | props：task/members/open/name/fresh/blocked；emits：toggle、assign、create、update:name |
+   | `ChatPanel.vue` | 62 | 对话列（时间线 + 输入框），自带滚到底 | props：messages/sending/draft；emits：update:draft、send、goto；expose：scrollToBottom |
+   | `MemberRoster.vue` | 34 | 名册块（含"手填名字→出邀请码"） | props：members/name；emits：update:name、add |
+   | `constants.js` | 49 | 常量表 + 纯函数（字号档位/筛选/状态/优先级/是否阻塞/是否新） | 纯导出 |
+   | `assets/workspace.css` | 348 | 工作台样式（从 SFC 整块搬出） | — |
+
+2. **样式整块搬到全局 `assets/workspace.css`**（在 `main.js` 里引一次）。为什么不是各组件留自己的 scoped：
+   拆开后父组件的 scoped 样式**碰不到子组件内部**；而这些类名全部以 `.ws-` 前缀命名空间化，放全局不会误伤其他页面。
+   这样搬还有一个好处：**零样式改动**，样式回归风险最低。
+3. 组件一律"父组件管状态、子组件只管渲染"：子组件通过 props 收数据、用 emits 抛事件（`toggle-assign`/`assign`/`create-assign` 由父组件补回"哪张卡"再走原有逻辑）。
+   滚动交给 `ChatPanel` 自己（watch 消息数 + 暴露 `scrollToBottom()`），父组件不再持有 threadEl。
+
+**为什么**：1029 行的单文件组件里，对话区、看板卡、名册、样式四件事混在一起；改指派要翻到文件中部，
+改样式要翻到末尾（见 `AGENTS.md` 的"一个文件一个职责 / 软上限 400 行"）。
+
+**代价 / 遗留**：① 父组件仍有 **483 行**（页面全部状态与取数逻辑还在里面，略超 400 行软上限）→
+下一步抽 `components/workspace/useWorkspace.js`（状态 + 取数 + 事件处理），SFC 只留模板与接线；
+② 样式文件 348 行 > 400 的线还没碰到，但已接近，后续再拆成 `workspace-base.css` / `workspace-board.css`；
+③ 全局样式依赖 `.ws-` 前缀自律，新增类名必须带前缀。
+
+**验证**：
+- `npm run build -- --outDir node_modules/.build-split` 通过（Workspace 路由块 21.46 kB）。
+- **浏览器探针 100% PASS**（复用 `.workbuddy/tmp/assign-ui-probe-20260927.mjs`：选中项目 → 全屏看板 21 张卡 →
+  点卡片负责人开浮层 → 新建占位成员并指派 → 卡片名字变且仍在原列 → 接口回读 placeholder+邀请码 →
+  切「我 · alice」出 70 条 → 退出全屏确认左栏名册可见 → **零 JS 报错、零失败请求**）。
+- 截图 `assign-shots-20260927/`（01 浮层 / 02 指派完成 / 03 我的任务 / 04 左栏名册）——样式与拆分前一致。
