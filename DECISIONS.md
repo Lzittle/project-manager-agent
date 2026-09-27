@@ -298,3 +298,44 @@
 **代价**：① 只读轮次里模型不能写（这是设计意图，但若用户在问进度时顺口说"顺便标记完成"，要等下一轮）；② 工具白名单会给"自创工具名"回一条可读的拒绝信息（多花一步，但比静默执行安全）；③ 描述变短后，个别冷门工具的用法更依赖模型常识——评测里 65/65 没退化，但新增工具时要同步补用例。
 
 **验证**：`pytest tests -q` → **63 passed**（新增"绑定/只读模式下猜名字也调不动"的用例）；离线 65/65；在线 65/65（档案：工作区 `docs/Agent_Audit_Logs/2026-09-27_agent-eval-baseline/5_*` 与 `6_*`）。
+
+## D-025 · 2026-09-27 · 按职责拆文件（agent.py 1379 → 97 行）+ 立下文件行数规矩
+
+**决策**：
+
+1. **`core/agent.py` 按职责拆成 6 个模块**（纯搬运，不改行为）：
+
+   | 文件 | 行数 | 职责 |
+   |---|---|---|
+   | `core/agent.py` | **97**（原 1379） | 主循环（组装 messages → 调模型 → 执行工具）+ 把拆出去的名字转出去 |
+   | `core/tools.py` | 206 | 工具 schema（给模型看的）与按会话状态裁剪 |
+   | `core/intents.py` | 181 | 意图正则与确定性路由（跨项目拦截/追问/规划/名单分配/确认落库/只读） |
+   | `core/executor.py` | 42 | 把 4 个 mixin 组装成一个类 + `dispatch`（含工具白名单） |
+   | `core/executor_core.py` | 295 | 项目/任务/知识库工具 |
+   | `core/executor_plan.py` | 213 | 任务规划（`plan_tasks` 与幂等/最近批次） |
+   | `core/executor_team.py` | 257 | 小队成员、指派、按名单拟方案与落库 |
+   | `core/executor_trace.py` | 116 | 执行轨迹与实体引用 |
+   | `core/prompts.py` / `core/utils.py` | 34 / 26 | system prompt / 小工具（`clip`、`brief_error`、`PRI_CN`） |
+
+2. **立规矩并写进仓库根 `AGENTS.md`**：一个文件一个职责；**单文件软上限 400 行**，超过就按职责缝拆；
+   新功能先找"家"；纯数据表/测试/用例 JSON 例外但要写明；**拆分必须逐行搬运 + 机器核对**。
+
+**怎么做的（可复现）**：两个搬运脚本 `.workbuddy/tmp/split_agent_py_20260927.py`、`split_executor_py_20260927.py`
+按行区间抽出原文 → 加各自文件头 → 写新文件；只做两处改名（`_clip`→`clip`、`_brief_error`→`brief_error`、`_PRI_CN`→`PRI_CN`）。
+`core/agent.py` 保留**同名转出**（re-export），所以 `api/chat.py`、`eval/`、`tests/` 的老 import 一行都不用改。
+
+**教训（本轮最值钱的一条）**：第一版核对只断言"原文块是新文件的**子串**"，结果 `utils.py` 少搬了一行
+`return f"…｜建议：{hint}"` —— 子串检查照样通过。**包含 ≠ 全等**。
+于是把核对升级成 `.workbuddy/tmp/verify_split_20260927.py`：从 git 取拆分前的 `agent.py`，
+按同一套区间重建期望内容，做**多集校验**（原文每个非空行都要在新文件里出现同样次数，1241/1241 ✓）
+加**行区间覆盖检查**（无未归属行 ✓）。
+
+**顺带暴露的两处隐式耦合**（拆模块时才会疼）：
+① `executor` 原来靠"住在 agent.py 里"才看得见 `build_tools` / `brief_error` → 补了 import；
+② 测试里 `monkeypatch.setattr("core.agent.rag_search", …)` 失效 → 改成 `core.executor_plan.rag_search`。
+**结论记进 AGENTS.md：被 patch 的模块路径也是接口。**
+
+**验证**：`pytest tests -q` → **63 passed**；离线评测 **65/65**，路由分布与拆分前**逐项一致**
+（agent=43 / query=14 / plan=2 / conflict=2 / ask=2 / assign_plan=1 / apply=1）；
+真模型烟测三条（指派 `m01`、确认落库 `a02`、进度查询 `q01`）各 1/1 通过；
+结构核对 1241/1241 行零丢失。

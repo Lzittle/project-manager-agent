@@ -1000,7 +1000,8 @@ def _capture_plan_ctx(client, monkeypatch, project_id, existing_title="", rag_hi
 
     monkeypatch.setattr("core.llm.chat", fake_chat)
     if rag_hits is not None:
-        monkeypatch.setattr("core.agent.rag_search", lambda *a, **kw: rag_hits)
+        # 拆分后 plan_tasks 在 core/executor_plan.py 里用 rag_search：要patch它自己的模块名
+        monkeypatch.setattr("core.executor_plan.rag_search", lambda *a, **kw: rag_hits)
 
     r = client.post("/api/chat/send",
                     json={"message": "继续帮我规划几个任务", "user_id": 1, "project_id": project_id})

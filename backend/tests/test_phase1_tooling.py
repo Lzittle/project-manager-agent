@@ -64,7 +64,8 @@ def test_task_list_is_lean_and_paged(client):
 
 # ---------- 2. 工具错误：压缩后再回填 ----------
 
-def test_tool_error_is_compressed():
+def test_tool_error_is_compressed(client):
+    # 依赖 client fixture：它会触发 lifespan 建表（单独跑这条时也成立）
     ex = _ToolExecutor(user_id=1, project_id=1)
     res = ex.dispatch("list_tasks", {"limit": "不是数字"})
     assert res["ok"] is False

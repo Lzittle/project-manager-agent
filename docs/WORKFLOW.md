@@ -51,6 +51,7 @@
 - 仓库只放代码 + 开发文档。审计日志、记忆、截图不落仓库（见 `.agent_config.yaml` 与 `.workbuddy/memory/`）。
 - AI 产出的一般文件命名：`{YYYY-MM-DD}_{描述}.{ext}`；会话归档入 `docs/Agent_Audit_Logs/`。
 - 固定文书用固定名：`PLAN.md`、`DECISIONS.md`、`docs/WORKFLOW.md`、`docs/DEV_OPS.md`。
+- 代码组织规矩（一个文件一个职责 / 单文件软上限 400 行 / 拆分要逐行核对）写在仓库根的 **`AGENTS.md`**，动手前先读。
 
 ## 5. 每轮结束的收尾（本项目为长期项目，强制）
 
