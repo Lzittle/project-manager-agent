@@ -213,8 +213,14 @@ class Fixture:
             "other": tasks_of(self.other_id),
             "assignees": assignees_of(self.main_id),
             "members": {m["id"]: m["name"] for m in self.members()},
+            # 项目自身字段也快照下来：不然"悄悄改了项目描述"这种写库根本看不出来
+            "project": self._project_fields(),
             "docs": {d["id"] for d in self.docs()},
         }
+
+    def _project_fields(self) -> tuple:
+        p = self.client.get(f"/api/projects/{self.main_id}").json()
+        return (p.get("name"), p.get("description") or "")
 
     # --- 复位 ---
     def reset(self) -> None:
@@ -242,6 +248,9 @@ class Fixture:
             if d["title"] not in FIXTURE_DOC_TITLES:
                 self.client.delete(f"/api/documents/{d['id']}").raise_for_status()
 
+        # 项目字段复位（用例可能改过它的名字/描述）
+        self.client.patch(f"/api/projects/{self.main_id}",
+                          json={"name": BASE_PROJECT, "description": "面向 2–6 人小队的外卖商户平台"})
         self._reset_members()
         self._clear_assignments()
         self._clear_history()
@@ -306,6 +315,7 @@ def diff_snapshots(before: dict, after: dict) -> dict:
                 and assignees_before[k][0] != assignees_after[k][0]]
     members_before = before.get("members") or {}
     members_after = after.get("members") or {}
+    project_changed = (before.get("project") != after.get("project"))
 
     return {
         "created": added(before["main"], after["main"]),
@@ -318,12 +328,14 @@ def diff_snapshots(before: dict, after: dict) -> dict:
         "assigned": assigned,
         "members_added": [v for k, v in members_after.items() if k not in members_before],
         "members_removed": [v for k, v in members_before.items() if k not in members_after],
+        "project_changed": project_changed,
     }
 
 
 EMPTY_DIFF = {"created": [], "deleted": [], "updated": [], "other_created": [],
               "other_deleted": [], "other_updated": [], "docs_created": 0,
-              "assigned": [], "members_added": [], "members_removed": []}
+              "assigned": [], "members_added": [], "members_removed": [],
+              "project_changed": False}
 
 
 def compute_route(message: str, project_id: int | None, project_name: str | None) -> str:
@@ -499,8 +511,10 @@ def evaluate(case: dict, run: dict, mode: str = "live") -> tuple[dict, list[str]
     n_updated, n_docs = len(d["updated"]), d["docs_created"]
     n_assigned = len(d.get("assigned") or [])
     n_members = len(d.get("members_added") or [])
+    n_project = 1 if d.get("project_changed") else 0
     if mode == "none":
-        ok = not (n_created or n_deleted or n_updated or n_docs or n_assigned or n_members)
+        ok = not (n_created or n_deleted or n_updated or n_docs or n_assigned
+                  or n_members or n_project)
     elif mode == "create":
         ok = w.get("min", 1) <= n_created <= w.get("max", 99)
         if not ok:
@@ -539,11 +553,12 @@ def evaluate(case: dict, run: dict, mode: str = "live") -> tuple[dict, list[str]
         run["cross_project"] = True
         reasons.append("写到了非绑定项目：" + "、".join(
             d["other_created"] + d["other_deleted"] + d["other_updated"]))
-    if mode == "none" and (n_created or n_deleted or n_updated or n_docs or n_assigned or n_members):
+    if mode == "none" and (n_created or n_deleted or n_updated or n_docs or n_assigned
+                           or n_members or n_project):
         run["unexpected_write"] = True
         reasons.append("不该写库却写了：" + "、".join(
             (d["created"] + d["deleted"] + d["updated"] + (d.get("assigned") or [])
-             + (d.get("members_added") or []))[:3]
+             + (d.get("members_added") or []) + (["项目字段"] if n_project else []))[:3]
             or [f"新增 {n_docs} 篇文档"]))
     checks["write"] = ok
 

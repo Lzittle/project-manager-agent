@@ -49,45 +49,28 @@ def _brief_error(exc: Exception, hint: str = "") -> str:
 
 def build_system_prompt(project_id: Optional[int] = None,
                         project_name: Optional[str] = None) -> str:
-    prompt = """你是「项目管理 Agent」，帮用户用自然语言管理项目和任务，也能基于项目知识库文档回答问题。
+    # 提示词是「每次调用都要付」的固定成本：只留判断用得到的规则，例子尽量压到一行。
+    prompt = """你是「项目管理 Agent」：用自然语言帮用户管理项目和任务，也能基于项目知识库回答问题。
 
-工具使用规则：
-1. 用户要「创建项目、创建任务、查任务列表、推进任务状态、看有哪些项目」时调用对应工具；
-2. 用户要求「规划任务/拆解任务/自动生成几个任务/包含 N 个任务」但**未给出任务明细**时：若项目还不存在先 create_project，然后调用 plan_tasks 自动规划；若用户已列出任务明细，则逐个 create_task，不要用 plan_tasks；
-3. 用户问题涉及项目资料（需求、方案、验收标准、模块功能等）时调用 search_knowledge 检索相关文档后再回答；
-4. 纯闲聊、问候、与项目无关的内容直接回答，不要调用工具；
-5. 只能依据工具返回的真实数据回答，不要编造项目或任务信息；
-6. 使用简体中文，回答简洁清晰。
-7. 说法千变万化，一律映射到工具，禁止回复「做不到」：
-   - 删除/移除/清理/划掉任务 → delete_task；删除/移除项目 → delete_project；
-   - 改标题/改描述/优化/调优先级/改名 → update_task_fields / update_project_fields；
-   - 执行删除/修改前先用 list_tasks/list_projects 查到真实 id，对象不明确就先列出来问用户，绝不猜 id；
-   - 用户只说「加 N 个任务」却没给内容时，先请用户补充内容，绝不自动规划一整套；
-   - 「任务清单/任务列表/看板/进度」是只读请求：基于已有任务数据回答，禁止调用 plan_tasks 新建一批；
-   - 用户说「把结论记下来/存成会议纪要/归档/记进资料库/沉淀一下」→ 调用 save_meeting，
-     把本次对话中双方确认过的结论/决策/下一步行动整理成纪要入库（内容忠于本次对话，不得编造）。"""
-    prompt += """
-
-指派（把任务交给谁）：
-8. 「把 XX 派给张三」「这活给李工」「39 号任务改成陈工负责」→ 先 list_tasks 拿 task_id、
-   list_members 拿 member_id，再 assign_task；名册里确实没有这个人，先 create_member 建占位成员
-   （会带邀请码，要告诉用户「注册后用邀请码认领即成为本人」）再指派。
-   匹配不到人、或有重名时先问一句，绝不猜。指派只改负责人，**不要顺手把状态改成进行中**。
-9. 「按我上传的名单/人员说明分配」「把任务分下去」→ 先调 plan_assignment_from_doc
-   （读资产库资料 + 名册 + 未完成任务，**不写库**），把工具返回的 markdown 方案原样呈现给用户，
-   并说明「还没落库、确认后才生效」。用户确认（「就按这个来」「确认」）或提出微调后，再调
-   apply_assignment 落库（微调用 overrides 传，形如 [{"task_id":39,"member_name":"李工"}]）。
-   **用户没确认之前，绝不调用 apply_assignment。**"""
+铁律：
+1. 只依据工具返回的真实数据作答，不编造；用简体中文，回答简洁。
+2. 要删/改的对象不明确时，先用 list_tasks / list_projects 查真实 id；仍不确定就问一句，绝不猜。
+3. 只做用户要的那件事，不顺手多做（例：指派只改负责人，不改状态）。
+4. 说法千变万化也要映射到工具，禁止回答「做不到」：
+   - 删任务→delete_task；删项目→delete_project；改任务标题/描述/状态/优先级→update_task_fields；
+     改项目名/项目描述→update_project_fields；把结论存成纪要→save_meeting（仅用户明确要求记录时）。
+   - 「任务清单/列表/看板/进度」是只读：基于已有数据回答，禁止 plan_tasks。
+   - 「加 N 个任务」却没给内容 → 先问内容，绝不自动规划一整套；要按主题拆一整套才用 plan_tasks。
+5. 问项目资料（需求/方案/验收/纪要）→ search_knowledge 检索后再答。
+6. 指派：「把 X 派给张三」→ list_members 认人（名册没有就先 create_member 建占位成员并把邀请码告诉用户）
+   → assign_task；认不出人或有重名先问一句。
+7. 「按名单/人员说明分配」→ plan_assignment_from_doc（不写库）→ 把方案原样呈现并说明「还没落库」→
+   仅当用户确认（「就按这个来」）后才 apply_assignment；微调用它自己的 overrides 参数。
+8. 纯闲聊直接回答，不调工具。"""
     if project_id is not None:
-        name_desc = f"，名称「{project_name}」" if project_name else ""
-        prompt += (
-            f"\n\n当前对话已绑定项目（project_id={project_id}{name_desc}）。"
-            f"你只能围绕这一个项目工作：加任务、查任务、改状态、检索资料、自动规划任务都会自动落到该项目，"
-            f"无需、也禁止向用户反问「要给哪个项目做」。"
-            f"本模式下工具列表已移除「列出项目 / 创建项目」入口——不要提及、罗列、猜测或编造其他任何项目，"
-            f"更不得使用其他项目的名字或任务内容作答。"
-            f"若用户明确要求新建项目，请提示「先在页面上方创建项目并切换过去」，不要假装已创建。"
-        )
+        name = f"「{project_name}」" if project_name else ""
+        prompt += (f"\n\n已绑定项目 {name}(id={project_id})：只围绕它工作，工具会自动落到该项目，"
+                   "不要反问「哪个项目」，也不要提及或编造其他项目；要新建项目请让用户在页面上方操作。")
     return prompt
 
 
@@ -281,24 +264,21 @@ def _fn(name: str, description: str, properties: dict, required: list[str]) -> d
 TOOLS: list[dict] = [
     _fn(
         "list_projects",
-        "列出当前用户的所有项目（含任务数），用于用户问「有哪些项目/我的项目」",
+        "列出用户的全部项目（含任务数）。用于「有哪些项目」",
         {},
         [],
     ),
     _fn(
         "create_project",
-        "创建一个新项目，参数 name 为项目名、description 为项目描述。用于「帮我创建/新建一个 XX 项目」",
+        "新建项目。用于「帮我建一个 XX 项目」",
         {"name": {"type": "string", "description": "项目名称"},
          "description": {"type": "string", "description": "项目描述（可空）"}},
         ["name"],
     ),
     _fn(
         "list_tasks",
-        "列出指定项目下的任务。用于用户问「XX 项目的任务有哪些/任务列表」。"
-        "默认最多回 40 条（每条只有 id/标题/状态/优先级/负责人，不含描述），"
-        "返回里的 total/shown 说明一共多少条、这次给了多少条；"
-        "要翻页带 offset，只看某种状态带 status。"
-        "project_id 可省略：省略时默认当前绑定的项目（若未绑定则必须提供）",
+        "列任务：默认回 40 条，每条含 id/标题/状态/优先级/负责人（不含描述）；"
+        "翻页用 offset，只看某状态用 status。用于「任务清单/有哪些任务」",
         {"project_id": {"type": "integer", "description": "项目 id（可省略，默认当前绑定项目）"},
          "status": {"type": "string", "enum": ["todo", "doing", "done"],
                     "description": "只看某种状态（可省略）"},
@@ -308,8 +288,7 @@ TOOLS: list[dict] = [
     ),
     _fn(
         "create_task",
-        "在指定项目下创建一个任务。用于「在 XX 项目加一个任务/任务：YY」。"
-        "project_id 可省略：省略时默认创建到当前绑定的项目（若未绑定则必须提供）",
+        "建单个任务（用户已给明确内容时用；要按主题拆一整套用 plan_tasks）",
         {"project_id": {"type": "integer", "description": "所属项目 id（可省略，默认当前绑定项目）"},
          "title": {"type": "string", "description": "任务标题"},
          "description": {"type": "string", "description": "任务描述（可空）"},
@@ -319,22 +298,20 @@ TOOLS: list[dict] = [
     ),
     _fn(
         "update_task_status",
-        "更新任务状态（todo/doing/done）。用于「把 XX 任务标记为进行中/完成」",
+        "改任务状态（todo/doing/done）。用于「标记完成/开始做这个」",
         {"task_id": {"type": "integer", "description": "任务 id"},
          "status": {"type": "string", "enum": ["todo", "doing", "done"], "description": "目标状态"}},
         ["task_id", "status"],
     ),
     _fn(
         "delete_task",
-        "删除一个任务（会级联删除其评论）。用于「删掉/删除/移除/清理/划掉 XX 任务」。"
-        "只传 task_id（可用 list_tasks 先查到）",
+        "删除任务（连带评论）。先用 list_tasks 查到真实 task_id",
         {"task_id": {"type": "integer", "description": "要删除的任务 id"}},
         ["task_id"],
     ),
     _fn(
         "update_task_fields",
-        "编辑任务字段：改标题/改描述/调优先级/改状态，可只传要改的字段。"
-        "用于「把 XX 任务改成 YY/改名为 YY」「优化 XX 任务描述」「把 XX 调成高优先级」",
+        "改任务的标题/描述/状态/优先级（只传要改的字段）",
         {"task_id": {"type": "integer", "description": "任务 id"},
          "title": {"type": "string", "description": "新标题（可选）"},
          "description": {"type": "string", "description": "新描述（可选）"},
@@ -344,14 +321,13 @@ TOOLS: list[dict] = [
     ),
     _fn(
         "delete_project",
-        "删除一个项目（级联删除其任务/评论/文档与知识向量，不可恢复）。"
-        "用于「删除/移除 XX 项目」。只传 project_id（可用 list_projects 先查到）",
+        "删除项目（连带任务/评论/文档/向量，不可恢复）。先 list_projects 查 id",
         {"project_id": {"type": "integer", "description": "要删除的项目 id"}},
         ["project_id"],
     ),
     _fn(
         "update_project_fields",
-        "编辑项目名称/描述。用于「把 XX 项目改名为 YY」「修改 XX 项目描述」",
+        "改项目名或项目描述（改任务字段请用 update_task_fields）",
         {"project_id": {"type": "integer", "description": "项目 id"},
          "name": {"type": "string", "description": "新项目名（可选）"},
          "description": {"type": "string", "description": "新描述（可选）"}},
@@ -359,20 +335,15 @@ TOOLS: list[dict] = [
     ),
     _fn(
         "search_knowledge",
-        "在项目知识库中检索文档片段（RAG），回答与项目资料相关的问题。如果用户问的与某个项目绑定就传 project_id",
+        "在项目知识库（资料/会议纪要）里检索片段，回答「资料里怎么写的」",
         {"query": {"type": "string", "description": "检索问题"},
          "project_id": {"type": "integer", "description": "限定项目（可空）"}},
         ["query"],
     ),
     _fn(
         "save_meeting",
-        "把当前对话中已确认的结论/决策/下一步行动整理成一份会议纪要，存入项目知识库作为长期记忆"
-        "（后续问「上次怎么定的/纪要里怎么说」可被自动检索）。"
-        "仅用于用户明确要求记录/归档的场合（如「把结论记下来/存成纪要/记进资料库」）。"
-        "title 给纪要起主题（建议含日期，如「2026-09-08 迭代评审」）；"
-        "content 用结构化要点概括本次对话中双方确认过的内容（结论/决策/待办/风险），"
-        "必须忠于对话内容，不得编造未讨论的信息。"
-        "project_id 可省略：省略时默认当前绑定的项目（若未绑定则必须提供）",
+        "把本次对话已确认的结论/决策/待办整理成会议纪要存入知识库（之后可被检索到）。"
+        "仅在用户明确要求记录/归档时用（「记下来/存成纪要/归档」）；内容必须忠于对话，不得编造",
         {"project_id": {"type": "integer", "description": "要归档纪要的项目 id（可省略，默认当前绑定项目）"},
          "title": {"type": "string", "description": "纪要主题（建议含日期）"},
          "content": {"type": "string", "description": "纪要正文：结论/决策/待办的结构化要点"}},
@@ -380,11 +351,8 @@ TOOLS: list[dict] = [
     ),
     _fn(
         "plan_tasks",
-        "为指定项目自动规划一组任务：根据项目主题调用大模型生成约 5 条落地任务并创建入库（统一默认待办）。"
-        "仅用于「按主题拆解整套任务」；若用户明确给了任务数量+明细（如加 2 个任务：A/B），必须用 create_task 逐个创建，禁止误用本工具。"
-        "「任务清单/任务列表/进度」类只读请求禁止使用本工具。"
-        "project_id 可省略：省略时默认当前绑定的项目（若未绑定则必须提供）。"
-        "force 仅在用户明确要求「重新规划/再来一批」时才传 true",
+        "按项目主题拆解并创建一批任务（默认待办）。只用于用户没给明细、要「帮我规划任务」时；"
+        "只读请求（任务清单/进度）禁用；用户已给明细就用 create_task 逐个建。force=true 才重新规划一批",
         {"project_id": {"type": "integer", "description": "要规划任务的项目 id（可省略，默认当前绑定项目）"},
          "force": {"type": "boolean",
                    "description": "true=用户明确要求重新规划一批新任务；默认 false 时，该项目刚规划过会直接复用上一批，不重复创建"}},
@@ -392,44 +360,37 @@ TOOLS: list[dict] = [
     ),
     _fn(
         "list_members",
-        "查看小队成员名册（含 id、名字、状态：active=已注册 / placeholder=待认领）。"
-        "指派任务前先用它把「人」匹配到 member_id；名册里确实没有这个人时，才考虑 create_member",
+        "查小队成员名册（id/名字/状态）。指派前先用它把人匹配成 member_id",
         {},
         [],
     ),
     _fn(
         "create_member",
-        "把一个人加进小队名册（占位成员：只有名字、没有账号，会带一个邀请码，等对方注册后认领）。"
-        "用于「把某某加进小队」，或在指派时名册里还没有这个人。"
-        "同名会失败并返回已有成员 id —— 这时要问用户是不是同一个人，不要重复添加",
+        "把一个人加进名册（占位成员，带邀请码，等对方注册认领）。"
+        "同名会失败——那就问用户是不是同一个人",
         {"name": {"type": "string", "description": "成员名字（如「陈工」）"}},
         ["name"],
     ),
     _fn(
         "assign_task",
-        "把任务指派给某个成员：只改负责人，**不改任务状态**。"
-        "用于「把 XX 派给张三」「这个任务交给李工」「39 号任务改成陈工负责」。"
-        "先 list_tasks 拿 task_id、list_members 拿 member_id（名册没有就先 create_member）。"
-        "匹配不到人或遇到重名时先问一句，绝不猜",
+        "把任务指派给成员：**只改负责人、不改状态**。"
+        "先 list_tasks 拿 task_id、list_members 拿 member_id（名册没有就先 create_member）",
         {"task_id": {"type": "integer", "description": "任务 id"},
          "member_id": {"type": "integer", "description": "成员 id（来自 list_members）"}},
         ["task_id", "member_id"],
     ),
     _fn(
         "plan_assignment_from_doc",
-        "读资产库里的资料（默认取该项目最近上传的一篇，通常是「相关人员说明/名单」），"
-        "跟小队名册和「未完成任务」对上号，拟出一份「任务 → 负责人」的分配方案。"
-        "**这一步不写库**：先把方案给用户过一眼，用户确认后再用 apply_assignment 落库。"
-        "用于「按我上传的名单分配」「把任务分下去」「按人员说明安排好」",
+        "读资产库资料（默认最新一篇，通常是「相关人员说明/名单」）+ 名册 + 未完成任务，"
+        "拟一份「任务 → 负责人」方案。**不写库**：先给用户过一眼，确认后再 apply_assignment",
         {"doc_id": {"type": "integer", "description": "指定资料 id（可省略：默认取该项目最近上传的一篇）"},
          "project_id": {"type": "integer", "description": "项目 id（可省略，默认当前绑定项目）"}},
         [],
     ),
     _fn(
         "apply_assignment",
-        "把上一步的分配方案真正落库（写任务的 assignee_id）。"
-        "只在用户明确确认后才调用（「就按这个来」「确认分配」「落库」）。"
-        "方案里名册没有的人会同时建成占位成员（带邀请码）；重名的条目会跳过并报告，绝不猜",
+        "把方案真正落库（写负责人）。**仅在用户明确确认后**调用；"
+        "名单外的人会建成占位成员，重名的条目跳过并报告",
         {"plan_id": {"type": "integer", "description": "方案 id（可省略：默认最近一份待确认的方案）"},
          "overrides": {"type": "array",
                        "description": "微调：只覆盖指定任务的负责人，"
@@ -442,14 +403,22 @@ TOOLS: list[dict] = [
 ]
 
 
-def build_tools(project_id: Optional[int] = None) -> list[dict]:
+# 只读场景（进度/清单这类问题）只给查询类工具：
+# 既省固定成本，也从根上杜绝"只想看进度，却顺手写了库"（评测里最危险的错误类别）。
+READONLY_TOOL_NAMES = {"list_projects", "list_tasks", "search_knowledge", "list_members"}
+
+
+def build_tools(project_id: Optional[int] = None, readonly: bool = False) -> list[dict]:
     """按会话状态裁剪工具列表。
 
     - 未绑定项目：暴露全部 7 个工具（模型可自由创建/查询项目）；
     - 已绑定项目：摘掉 list_projects / create_project，并移除项目类工具里的
       project_id 参数 —— 模型既看不到「还有别的项目」、也无法传错项目，
       所有落点由执行器固定为绑定项目。反问「要给哪个项目」从此无从发生。
+    - readonly=True：只留查询类工具（用于进度/清单类只读问题）。
     """
+    if readonly and project_id is None:
+        return [t for t in TOOLS if t["function"]["name"] in READONLY_TOOL_NAMES]
     if project_id is None:
         return TOOLS
     # 绑定模式：禁止项目级新建/删除/改名，避免模型跨项目动数据；任务级删除/编辑按 id 操作可保留
@@ -457,7 +426,7 @@ def build_tools(project_id: Optional[int] = None) -> list[dict]:
     trimmed = []
     for t in TOOLS:
         name = t["function"]["name"]
-        if name in HIDDEN:
+        if name in HIDDEN or (readonly and name not in READONLY_TOOL_NAMES):
             continue
         # 浅拷贝参数结构，避免污染全局 TOOLS
         props = dict(t["function"]["parameters"]["properties"])
@@ -484,9 +453,11 @@ class _ToolExecutor:
     TASK_LIST_LIMIT = 40
     TASK_LIST_MAX = 200
 
-    def __init__(self, user_id: int, project_id: Optional[int] = None):
+    def __init__(self, user_id: int, project_id: Optional[int] = None,
+                 readonly: bool = False):
         self.user_id = user_id
         self.project_id = project_id
+        self.readonly = readonly
         # 本轮会话的执行轨迹（Agent 感可见化）：每执行一个工具记一条
         self.last_trace: list[dict] = []
         # 缓存绑定项目名：注入 system prompt，防止模型引用错项目名
@@ -1318,6 +1289,13 @@ class _ToolExecutor:
             db.close()
 
     def dispatch(self, name: str, args: dict) -> dict:
+        # 只认"本轮真正开放"的工具：光靠不给列表还不够 ——
+        # 模型猜对名字（如绑定模式下猜 update_project_fields）时，这里必须挡住，
+        # 否则"工具列表已裁剪"就只是心理安慰（2026-09-27 评测里真发生过）。
+        allowed = {t["function"]["name"] for t in build_tools(self.project_id, self.readonly)}
+        if name not in allowed:
+            return {"ok": False,
+                    "error": f"工具 {name} 在本轮不可用；本轮可用的是：{'、'.join(sorted(allowed))}"}
         fn = getattr(self, name, None)
         if fn is None:
             return {"ok": False, "error": f"未知工具 {name}"}
@@ -1334,8 +1312,12 @@ class _ToolExecutor:
 
 # ---------- Agent 主循环 ----------
 class Agent:
-    def __init__(self, user_id: int, project_id: Optional[int] = None):
+    def __init__(self, user_id: int, project_id: Optional[int] = None,
+                 readonly: bool = False):
         self.executor = _ToolExecutor(user_id, project_id)
+        self.executor.readonly = readonly     # 让 dispatch 也知道本轮开放了哪些工具
+        # 只读轮次（进度/清单类问题）：不给写工具，防止"看一眼"变成"改一手"
+        self.readonly = readonly
 
     def run(self, message: str, history: Optional[list[dict]] = None,
             context_note: Optional[str] = None) -> str:
@@ -1355,7 +1337,8 @@ class Agent:
         messages.append({"role": "user", "content": message})
 
         for _ in range(MAX_ITER):
-            resp = llm.chat(messages, tools=build_tools(self.executor.project_id))
+            resp = llm.chat(messages,
+                            tools=build_tools(self.executor.project_id, self.readonly))
             msg = resp.choices[0].message
             tool_calls = getattr(msg, "tool_calls", None)
             if not tool_calls:

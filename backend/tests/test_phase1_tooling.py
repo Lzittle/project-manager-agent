@@ -74,6 +74,23 @@ def test_tool_error_is_compressed():
     assert len(res["error"]) <= 220                   # 够短
 
 
+def test_dispatch_refuses_tools_not_offered(client):
+    """绑定模式不给项目级写工具，模型"猜对名字"也必须被挡（2026-09-27 评测中真发生过）。"""
+    pid = _project(client, "工具白名单测试")["id"]
+    ex = _ToolExecutor(user_id=1, project_id=pid)
+    res = ex.dispatch("update_project_fields", {"project_id": pid, "description": "偷偷改"})
+    assert res["ok"] is False
+    assert "不可用" in res["error"]
+    # 项目描述没被改
+    got = client.get(f"/api/projects/{pid}").json()
+    assert got["description"] == "pytest"
+
+    # 只读轮次里，写工具同样调不动
+    ro = _ToolExecutor(user_id=1, project_id=pid, readonly=True)
+    res2 = ro.dispatch("create_task", {"title": "偷偷建"})
+    assert res2["ok"] is False and "不可用" in res2["error"]
+
+
 # ---------- 3. 长对话：压缩早期历史 ----------
 
 def test_long_history_is_compacted(client, monkeypatch):
