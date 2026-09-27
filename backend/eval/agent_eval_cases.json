@@ -6,7 +6,8 @@
     "expect.route": "期望走代码层哪条路由：conflict / ask / plan / query / agent",
     "expect.must_call_any": "每组至少命中一个工具（AND of OR）",
     "expect.must_not_call": "禁止调用的工具",
-    "expect.write.mode": "none / create / update / delete / doc",
+    "expect.write.mode": "none / create / update / delete / doc / assign(改负责人) / member(加成员) / assign_or_member",
+    "setup": "可选：跑该用例前先做的准备｜plan_assignment（先生成一份待确认方案；offline 用直连 DB 的假方案，零 token）｜prior_conversation（先塞一段前置对话，让「刚才的结论」有指代）",
     "expect.reply_contains_any": "回复里至少出现其中一个关键词",
     "known_gap": "true=已知的现有短板（基线先记录，用来观察改没改好）",
     "repeat": "整条用例重复发送的次数，用于测幂等"
@@ -327,6 +328,7 @@
     },
     {
       "id": "w11_save_meeting",
+      "setup": "prior_conversation",
       "category": "写入",
       "bound": true,
       "message": "把这次讨论的结论存成会议纪要",
@@ -613,6 +615,352 @@
       },
       "known_gap": true,
       "note": "第二次应提示已存在，而不是建出同名任务"
+    },
+    {
+      "id": "m01_assign_known_member",
+      "category": "成员指派",
+      "bound": true,
+      "message": "把「素材拍摄」这个任务派给张三",
+      "expect": {
+        "route": ["agent"],
+        "must_call_any": [["assign_task"]],
+        "must_not_call": ["update_task_status", "plan_tasks", "create_task"],
+        "write": {"mode": "assign", "min": 1, "max": 1},
+        "reply_contains_any": ["张三"]
+      },
+      "known_gap": false,
+      "note": "名册里有人 → 直接派；指派不算改状态（D-005）"
+    },
+    {
+      "id": "m02_assign_unknown_person",
+      "category": "成员指派",
+      "bound": true,
+      "message": "把「首页设计」交给王五",
+      "expect": {
+        "route": ["agent"],
+        "must_call_any": [["assign_task", "create_member"]],
+        "must_not_call": ["update_task_status", "plan_tasks"],
+        "write": {"mode": "assign_or_member", "min": 1},
+        "reply_contains_any": ["王五"]
+      },
+      "known_gap": false,
+      "note": "名册里没这个人 → 先建占位成员（带邀请码）再派"
+    },
+    {
+      "id": "m03_add_member_only",
+      "category": "成员指派",
+      "bound": true,
+      "message": "把王五加进小队名册",
+      "expect": {
+        "route": ["agent"],
+        "must_call_any": [["create_member"]],
+        "must_not_call": ["create_task", "plan_tasks"],
+        "write": {"mode": "member", "min": 1},
+        "reply_contains_any": ["王五"]
+      },
+      "known_gap": false,
+      "note": "只加人，不动任务"
+    },
+    {
+      "id": "m04_list_members",
+      "category": "成员指派",
+      "bound": true,
+      "message": "我们小队现在都有谁？",
+      "expect": {
+        "route": ["agent"],
+        "must_call_any": [["list_members"]],
+        "must_not_call": ["create_member", "assign_task"],
+        "write": {"mode": "none"},
+        "reply_contains_any": ["张三", "李四"]
+      },
+      "known_gap": false,
+      "note": "只读名册，不许顺手加人"
+    },
+    {
+      "id": "m05_reassign",
+      "category": "成员指派",
+      "bound": true,
+      "message": "「登录联调」改由李四负责",
+      "expect": {
+        "route": ["agent"],
+        "must_call_any": [["assign_task"]],
+        "must_not_call": ["update_task_status"],
+        "write": {"mode": "assign", "min": 1, "max": 1},
+        "reply_contains_any": ["李四"]
+      },
+      "known_gap": false,
+      "note": "改派也是指派：只换人，不碰状态"
+    },
+    {
+      "id": "m06_who_owns_what",
+      "category": "成员指派",
+      "bound": true,
+      "message": "张三负责哪些任务？",
+      "expect": {
+        "route": ["query", "agent"],
+        "must_call_any": [["list_tasks", "project_snapshot"]],
+        "must_not_call": ["assign_task", "create_member"],
+        "write": {"mode": "none"},
+        "reply_contains_any": ["任务"]
+      },
+      "known_gap": false,
+      "note": "问「谁负责什么」是只读"
+    },
+    {
+      "id": "a01_plan_assignment_from_roster",
+      "category": "按名单分配",
+      "bound": true,
+      "message": "按我上传的人员说明把任务分配一下",
+      "expect": {
+        "route": ["assign_plan"],
+        "must_call_any": [["plan_assignment_from_doc"]],
+        "must_not_call": ["apply_assignment", "assign_task", "plan_tasks"],
+        "write": {"mode": "none"},
+        "reply_contains_any": ["还没落库"]
+      },
+      "known_gap": false,
+      "note": "只出方案：确认前一个字都不许写库（D-017）"
+    },
+    {
+      "id": "a02_confirm_applies",
+      "category": "按名单分配",
+      "bound": true,
+      "setup": "plan_assignment",
+      "message": "就按这个来",
+      "expect": {
+        "route": ["apply"],
+        "must_call_any": [["apply_assignment"]],
+        "must_not_call": ["create_task", "plan_tasks"],
+        "write": {"mode": "assign", "min": 1},
+        "reply_contains_any": ["落库"]
+      },
+      "known_gap": false,
+      "note": "用户确认后才落库；前置先生成一份待确认方案"
+    },
+    {
+      "id": "a03_confirm_word_without_plan",
+      "category": "按名单分配",
+      "bound": true,
+      "message": "确认一下这个任务是不是被卡住了",
+      "expect": {
+        "route": ["query", "agent"],
+        "must_call_any": [],
+        "must_not_call": ["apply_assignment"],
+        "write": {"mode": "none"},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "没有待确认方案时，「确认」不能被当成落库"
+    },
+    {
+      "id": "a04_roster_words_without_assign",
+      "category": "按名单分配",
+      "bound": true,
+      "message": "按人员说明看看验收标准怎么写的",
+      "expect": {
+        "route": ["query", "agent"],
+        "must_call_any": [],
+        "must_not_call": ["plan_assignment_from_doc", "assign_task", "plan_tasks"],
+        "write": {"mode": "none"},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "提到「人员说明」但没有分配动作 → 走只读/兜底，不拟分配方案"
+    },
+    {
+      "id": "d01_delete_two_tasks",
+      "category": "写入",
+      "bound": true,
+      "message": "删掉「素材拍摄」和「首页设计」这两个任务",
+      "expect": {
+        "route": ["agent"],
+        "must_call_any": [["delete_task"]],
+        "must_not_call": ["create_task", "plan_tasks"],
+        "write": {"mode": "delete", "min": 2, "max": 2},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "批量删除：必须删对两条"
+    },
+    {
+      "id": "d02_project_edit_in_bound_mode",
+      "category": "写入",
+      "bound": true,
+      "message": "把项目描述改成「外卖商户中台」",
+      "expect": {
+        "route": ["agent"],
+        "must_call_any": [],
+        "must_not_call": ["update_task_fields", "plan_tasks", "create_task", "delete_task"],
+        "write": {"mode": "none"},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "绑定模式刻意不暴露项目级编辑工具（build_tools 的 HIDDEN）：这里要的是「别动任务、别瞎写」，而不是硬调一个不存在的工具"
+    },
+    {
+      "id": "n01_send_me_the_list",
+      "category": "只读负例",
+      "bound": true,
+      "message": "把任务列表发我看看",
+      "expect": {
+        "route": ["query", "agent"],
+        "must_call_any": [],
+        "must_not_call": ["plan_tasks", "create_task", "assign_task", "create_member"],
+        "write": {"mode": "none"},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "「发我看看」是只读——最容易诱发误写的一类说法"
+    },
+    {
+      "id": "n02_who_is_doing_what",
+      "category": "只读负例",
+      "bound": true,
+      "message": "现在谁在做什么？",
+      "expect": {
+        "route": ["query", "agent"],
+        "must_call_any": [],
+        "must_not_call": ["plan_tasks", "create_task", "assign_task", "create_member"],
+        "write": {"mode": "none"},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "问人和任务的对应关系，只读"
+    },
+    {
+      "id": "n03_key_this_week",
+      "category": "只读负例",
+      "bound": true,
+      "message": "帮我看看这周的重点是什么",
+      "expect": {
+        "route": ["query", "agent"],
+        "must_call_any": [],
+        "must_not_call": ["plan_tasks", "create_task"],
+        "write": {"mode": "none"},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "「看看重点」是分析请求，不是建任务"
+    },
+    {
+      "id": "n04_single_task_status",
+      "category": "只读负例",
+      "bound": true,
+      "message": "「支付回调修复」现在是什么状态？",
+      "expect": {
+        "route": ["query", "agent"],
+        "must_call_any": [],
+        "must_not_call": ["update_task_status", "update_task_fields", "plan_tasks"],
+        "write": {"mode": "none"},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "问状态 ≠ 改状态"
+    },
+    {
+      "id": "n05_sort_for_me",
+      "category": "只读负例",
+      "bound": true,
+      "message": "按优先级排一下给我看",
+      "expect": {
+        "route": ["query", "agent"],
+        "must_call_any": [],
+        "must_not_call": ["update_task_fields", "plan_tasks", "create_task"],
+        "write": {"mode": "none"},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "「排一下」只影响显示，不该改数据"
+    },
+    {
+      "id": "n06_review_plan_again",
+      "category": "只读负例",
+      "bound": true,
+      "message": "重新看一下现在的计划",
+      "expect": {
+        "route": ["query", "agent"],
+        "must_call_any": [],
+        "must_not_call": ["plan_tasks", "create_task"],
+        "write": {"mode": "none"},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "「重新」很容易被当成「重新规划」，这里是只读"
+    },
+    {
+      "id": "n07_make_a_list",
+      "category": "只读负例",
+      "bound": true,
+      "message": "生成一份任务清单",
+      "expect": {
+        "route": ["query", "agent"],
+        "must_call_any": [],
+        "must_not_call": ["plan_tasks", "create_task"],
+        "write": {"mode": "none"},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "「生成清单」是只读（g05 的近亲说法）"
+    },
+    {
+      "id": "n08_risk_review",
+      "category": "只读负例",
+      "bound": true,
+      "message": "评估一下这些任务的风险",
+      "expect": {
+        "route": ["query", "agent"],
+        "must_call_any": [],
+        "must_not_call": ["plan_tasks", "create_task", "save_meeting"],
+        "write": {"mode": "none"},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "评估是分析，不是写库"
+    },
+    {
+      "id": "n09_summarize_progress",
+      "category": "只读负例",
+      "bound": true,
+      "message": "把当前进度总结成一段话",
+      "expect": {
+        "route": ["query", "agent"],
+        "must_call_any": [],
+        "must_not_call": ["save_meeting", "plan_tasks", "create_task"],
+        "write": {"mode": "none"},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "「总结」不等于「记进资料库」——没让存就别存"
+    },
+    {
+      "id": "n10_what_is_blocked",
+      "category": "只读负例",
+      "bound": true,
+      "message": "有哪些任务被卡住了？",
+      "expect": {
+        "route": ["query", "agent"],
+        "must_call_any": [],
+        "must_not_call": ["plan_tasks", "create_task", "update_task_status"],
+        "write": {"mode": "none"},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "问阻塞，只读"
+    },
+    {
+      "id": "n11_assign_means_what",
+      "category": "只读负例",
+      "bound": true,
+      "message": "指派是什么意思？",
+      "expect": {
+        "route": ["agent"],
+        "must_call_any": [],
+        "must_not_call": ["assign_task", "create_member", "plan_tasks"],
+        "write": {"mode": "none"},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "问概念不是让你去指派"
     }
   ]
 }

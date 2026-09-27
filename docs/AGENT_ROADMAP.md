@@ -29,14 +29,16 @@
 
 ## 2. 对照业界：四篇原文 + 我们的差距
 
-抓下来的原文都在 `docs/资料/`（只去网页导航，正文未改）：
+抓下来的原文都在**工作区**的 `docs/资料/`（只去网页导航，正文未改）。
+> 按项目规范（`docs/WORKFLOW.md` §4）**仓库只放代码 + 开发文档**，外部参考资料留在工作区，不进仓库、不推远端。
+> 工作区路径前缀：`D:\workbuddy\项目管理agent\docs\资料\`
 
 | 原文 | 核心主张 | 我们现在的状态 |
 | --- | --- | --- |
-| [Anthropic · Writing effective tools for agents](资料/2026-09-27_Anthropic-Writing-Tools-For-Agents.md)（2025-09-11） | 工具要**少而准**、命名有边界、**返回有意义的上下文而不是一堆 id**、为 token 效率做分页/裁剪、用评测量工具（记录耗时/调用次数/token/工具错误），并留 held-out 测试集 | 工具边界清楚 ✓；但 `list_tasks` 返回全字段、`plan_assignment` 一次吐 16 行，**没做裁剪与分页**；评测里也只有耗时，没有逐次工具错误统计 |
-| [Anthropic · Effective context engineering](资料/2026-09-27_Anthropic-Effective-Context-Engineering.md)（2025-09-29） | 上下文是**有限资源**：压缩（compaction）、结构化笔记、子代理、按需检索 | 只带了最近 20 条历史，**没有压缩/摘要**；没有"结构化笔记"（结论沉淀）；按需检索 ✓（RAG） |
-| [Anthropic · Multi-agent research system](资料/2026-09-27_Anthropic-Multi-Agent-Research-System.md) | 评测要**立刻开始、小样本**；能自动判的自动判，主观的用 **LLM-as-judge**；**人评**补漏；非确定性要有 tracing；**会改状态的 agent 要评"终态"** | 前三条基本做到了（真模型评测 + 人工复核档案）；**终态评测没有**（多轮改状态后的结果对不对，没人系统评过） |
-| [12-Factor Agents](资料/2026-09-27_12-Factor-Agents.md) | 把自然语言→工具调用（①）、自己掌控提示与上下文（②③）、工具就是结构化输出（④）、执行状态与业务状态合一（⑤）、**需要人时用工具去问人**（⑦）、自己掌控控制流（⑧）、**压缩错误再回填上下文**（⑨）、小而专注的 agent（⑩） | ①④⑧ ✓（确定性路由 + 结构化工具返回）；**⑨ 没做**（工具异常原样回填，长堆栈会污染上下文）；⑦ 部分（方案确认），删除/批量写还缺"先给方案"；⑩ 工具数已到 17，**该考虑分组/分层** |
+| [Anthropic · Writing effective tools for agents](D:/workbuddy/项目管理agent/docs/资料/2026-09-27_Anthropic-Writing-Tools-For-Agents.md)（2025-09-11） | 工具要**少而准**、命名有边界、**返回有意义的上下文而不是一堆 id**、为 token 效率做分页/裁剪、用评测量工具（记录耗时/调用次数/token/工具错误），并留 held-out 测试集 | 工具边界清楚 ✓；但 `list_tasks` 返回全字段、`plan_assignment` 一次吐 16 行，**没做裁剪与分页**；评测里也只有耗时，没有逐次工具错误统计 |
+| [Anthropic · Effective context engineering](D:/workbuddy/项目管理agent/docs/资料/2026-09-27_Anthropic-Effective-Context-Engineering.md)（2025-09-29） | 上下文是**有限资源**：压缩（compaction）、结构化笔记、子代理、按需检索 | 只带了最近 20 条历史，**没有压缩/摘要**；没有"结构化笔记"（结论沉淀）；按需检索 ✓（RAG） |
+| [Anthropic · Multi-agent research system](D:/workbuddy/项目管理agent/docs/资料/2026-09-27_Anthropic-Multi-Agent-Research-System.md) | 评测要**立刻开始、小样本**；能自动判的自动判，主观的用 **LLM-as-judge**；**人评**补漏；非确定性要有 tracing；**会改状态的 agent 要评"终态"** | 前三条基本做到了（真模型评测 + 人工复核档案）；**终态评测没有**（多轮改状态后的结果对不对，没人系统评过） |
+| [12-Factor Agents](D:/workbuddy/项目管理agent/docs/资料/2026-09-27_12-Factor-Agents.md) | 把自然语言→工具调用（①）、自己掌控提示与上下文（②③）、工具就是结构化输出（④）、执行状态与业务状态合一（⑤）、**需要人时用工具去问人**（⑦）、自己掌控控制流（⑧）、**压缩错误再回填上下文**（⑨）、小而专注的 agent（⑩） | ①④⑧ ✓（确定性路由 + 结构化工具返回）；**⑨ 没做**（工具异常原样回填，长堆栈会污染上下文）；⑦ 部分（方案确认），删除/批量写还缺"先给方案"；⑩ 工具数已到 17，**该考虑分组/分层** |
 
 ---
 
@@ -66,11 +68,13 @@
 
 ## 4. 分四步走（每步都能单独验证）
 
-### 阶段 0 · 先把尺子立起来（1 轮，最优先）
+### 阶段 0 · 先把尺子立起来 —— ✅ 已完成 2026-09-27
 
-- 评测集从 42 条扩到 **65 条以上**：补齐删除/改字段/存纪要/成员/指派/按名单分配/确认落库，以及 **10 条"不该动数据"**的负例（如「生成任务清单」「看看进度」）。
-- `eval/run_agent_eval.py` 增补指标：**逐次工具错误数、token、平均耗时、工具选择正确率**，每次跑自动存报告（保留历史，不覆盖）。
-- **验收**：同一套用例能一键跑出报告；报告里能看到"这次比上次好在哪、差了哪"。
+- 评测集 **42 → 65 条**：新增「成员指派」6 条、「按名单分配」4 条、「只读负例」11 条（「把任务列表发我看看」「生成一份任务清单」「确认一下这个任务是不是被卡住了」等最容易诱发误写的说法），并补了批量删除与项目级编辑。
+- 评测器新增：**写库判定支持指派与加成员**（`assign` / `member` / `assign_or_member`）、**每次工具错误数**、**每用例 token**、**工具选择正确率**；报告新增「工具错误」列。
+- 用例前置（`setup`）：`plan_assignment`（先出方案 → 再测"确认落库"）、`prior_conversation`（先塞前置对话 → 再测"把刚才的结论存成纪要"）。
+- **基线结果（真模型 65 条）**：65/65 通过 · 误写率 0/45 · 越权 0 · 工具选择 65/65 · 工具报错 0 · 108 次调用 / 335.7k in + 10.5k out / 平均 1.9s。档案：工作区 `docs/Agent_Audit_Logs/2026-09-27_agent-eval-baseline/`。
+- **这一轮最值钱的产出**：第一遍跑出 2 条失败，查下来**都是尺子不准而不是 Agent 变笨**（夹具清空了历史导致"刚才的结论"没有指代；绑定模式本来就不暴露项目级编辑工具）。两条已修，修完 65/65。
 
 ### 阶段 1 · 按文章原则修工具与上下文（2 轮）
 
@@ -104,7 +108,7 @@
 | L3 在线真模型评测 | `run_agent_eval.py --mode live` | 真模型 | 话术 → 路由/工具/写库/回复，四项核对 | ✅ 有，**但用例集停在 9/14** |
 | L4 终态评测（**新增**） | 多轮脚本 + 断言最终状态 | 真模型 | 改状态的 agent 必须评"最终结果对不对" | ❌ 待做（阶段 3） |
 
-指标口径（沿用行业做法，见 `docs/资料/2026-09-27_Anthropic-Writing-Tools-For-Agents.md`）：
+指标口径（沿用行业做法，见工作区 `docs/资料/2026-09-27_Anthropic-Writing-Tools-For-Agents.md`）：
 通过率 · 工具选择正确率 · 误写率（只读请求被写库）· 越权写库 · 平均耗时 · token 消耗 · 工具错误数。
 
 复现命令：
@@ -120,16 +124,16 @@ cd backend
 
 ## 6. 资料清单（原文都在仓库里，可随时查证）
 
-| 文件 | 来源 |
+| 文件（都在工作区 `docs/资料/`，不进仓库） | 来源 |
 | --- | --- |
-| `docs/资料/2026-09-27_Anthropic-Writing-Tools-For-Agents.md` | anthropic.com/engineering/writing-tools-for-agents |
-| `docs/资料/2026-09-27_Anthropic-Effective-Context-Engineering.md` | anthropic.com/engineering/effective-context-engineering-for-ai-agents |
-| `docs/资料/2026-09-27_Anthropic-Multi-Agent-Research-System.md` | anthropic.com/engineering/multi-agent-research-system |
-| `docs/资料/2026-09-27_12-Factor-Agents.md` | github.com/humanlayer/12-factor-agents |
-| OpenAI《A Practical Guide to Building Agents》官方 PDF | cdn.openai.com |
-| `docs/资料/2026-09-16_Anthropic-Building-Effective-Agents.md` | anthropic.com/engineering/building-effective-agents（9/16 抓的） |
+| `2026-09-27_Anthropic-Writing-Tools-For-Agents.md` | anthropic.com/engineering/writing-tools-for-agents |
+| `2026-09-27_Anthropic-Effective-Context-Engineering.md` | anthropic.com/engineering/effective-context-engineering-for-ai-agents |
+| `2026-09-27_Anthropic-Multi-Agent-Research-System.md` | anthropic.com/engineering/multi-agent-research-system |
+| `2026-09-27_Anthropic-Agent-Skills.md` | anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills |
+| `2026-09-27_12-Factor-Agents.md` | github.com/humanlayer/12-factor-agents |
+| `2026-09-27_OpenAI-A-Practical-Guide-To-Building-Agents.pdf` | cdn.openai.com（官方指南 PDF，7MB，文字未抽取） |
+| `2026-09-16_Anthropic-Building-Effective-Agents.md` | anthropic.com/engineering/building-effective-agents（9/16 抓的） |
 
 > 抓取说明：`platform.openai.com` 的文档页有 Cloudflare 拦截（403），所以 OpenAI 这边只留下官方 PDF 原文；
 > 文字抽取需要 `pypdf`，当前 venv 里没装——要看内容直接打开 PDF。
-> **这份 7MB 的 PDF 没有进代码仓库**（仓库只放代码与文本资料），存在工作区：
-> `D:\workbuddy\项目管理agent\docs\资料\2026-09-27_OpenAI-A-Practical-Guide-To-Building-Agents.pdf`。
+> 抓取脚本：`.workbuddy/tmp/fetch_agent_articles_20260927.py`（要重抓或补文章直接改这个列表）。

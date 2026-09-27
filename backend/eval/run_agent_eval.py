@@ -86,7 +86,16 @@ MEETING_TEXT = """2026-09-01 迭代评审（评测夹具）
 1. 支付渠道资质审批可能延期，影响上线时间。
 """
 
-FIXTURE_DOC_TITLES = {DOC_TITLE, MEETING_TITLE}
+ROSTER_TITLE = "相关人员说明"
+ROSTER_TEXT = """相关人员说明（评测夹具）
+
+- 张三：后端负责人，负责接口开发、数据库与联调。
+- 李四：前端负责人，负责页面开发、组件与看板展示。
+"""
+
+# 名册基线：每条用例前复位成这两个人（占位身份即可）
+FIXTURE_MEMBERS = ["张三", "李四"]
+FIXTURE_DOC_TITLES = {DOC_TITLE, MEETING_TITLE, ROSTER_TITLE}
 
 
 # ---------- 启动引导：环境变量必须在导入应用前设好 ----------
@@ -166,6 +175,13 @@ class Fixture:
                 f"/api/projects/{self.main_id}/meetings",
                 data={"title": MEETING_TITLE, "content": MEETING_TEXT},
             ).raise_for_status()
+        # 名单最后上传 → 它就是该项目「最近一篇资料」，plan_assignment_from_doc 默认读它
+        if ROSTER_TITLE not in titles:
+            self.client.post(
+                f"/api/projects/{self.main_id}/documents",
+                files={"file": ("roster.md", ROSTER_TEXT.encode("utf-8"), "text/markdown")},
+                data={"title": ROSTER_TITLE, "doc_type": "doc"},
+            ).raise_for_status()
 
     # --- 读 ---
     def _get(self, url: str, **params) -> list:
@@ -179,15 +195,24 @@ class Fixture:
     def docs(self) -> list:
         return self._get(f"/api/projects/{self.main_id}/documents")
 
+    def members(self) -> list:
+        return self._get("/api/members")
+
     def snapshot(self) -> dict:
         def tasks_of(pid):
             return {t["id"]: (t["title"], t["status"], t["priority"],
                               (t.get("description") or ""))
                     for t in self.tasks(pid)}
 
+        def assignees_of(pid):
+            return {t["id"]: (t.get("assignee_name") or "", t["title"])
+                    for t in self.tasks(pid)}
+
         return {
             "main": tasks_of(self.main_id),
             "other": tasks_of(self.other_id),
+            "assignees": assignees_of(self.main_id),
+            "members": {m["id"]: m["name"] for m in self.members()},
             "docs": {d["id"] for d in self.docs()},
         }
 
@@ -217,7 +242,38 @@ class Fixture:
             if d["title"] not in FIXTURE_DOC_TITLES:
                 self.client.delete(f"/api/documents/{d['id']}").raise_for_status()
 
+        self._reset_members()
+        self._clear_assignments()
         self._clear_history()
+
+    @staticmethod
+    def _clear_assignments() -> None:
+        """清掉上一轮留下的分配方案（pending 会影响「确认」这类用例的路由判定）。"""
+        from models.database import AssignmentRun, SessionLocal
+
+        db = SessionLocal()
+        try:
+            db.query(AssignmentRun).delete()
+            db.commit()
+        finally:
+            db.close()
+
+    def _reset_members(self) -> None:
+        """名册复位：清空后重建基线成员。
+
+        这里直连 DB，因为**目前还没有「删除成员」的接口**（队长填错人只能这样清）——
+        这条缺口记在 PLAN §9 待定⑤里，本轮不顺手加功能。
+        """
+        from models.database import Member, SessionLocal
+
+        db = SessionLocal()
+        try:
+            db.query(Member).delete()
+            db.commit()
+        finally:
+            db.close()
+        for name in FIXTURE_MEMBERS:
+            self.client.post("/api/members", json={"name": name}).raise_for_status()
 
     @staticmethod
     def _clear_history() -> None:
@@ -243,6 +299,14 @@ def diff_snapshots(before: dict, after: dict) -> dict:
     def changed(b, a):
         return [a[k][0] for k in b if k in a and b[k] != a[k]]
 
+    assignees_before = before.get("assignees") or {}
+    assignees_after = after.get("assignees") or {}
+    assigned = [assignees_after[k][1] for k in assignees_before
+                if k in assignees_after
+                and assignees_before[k][0] != assignees_after[k][0]]
+    members_before = before.get("members") or {}
+    members_after = after.get("members") or {}
+
     return {
         "created": added(before["main"], after["main"]),
         "deleted": removed(before["main"], after["main"]),
@@ -251,11 +315,15 @@ def diff_snapshots(before: dict, after: dict) -> dict:
         "other_deleted": removed(before["other"], after["other"]),
         "other_updated": changed(before["other"], after["other"]),
         "docs_created": len(after["docs"] - before["docs"]),
+        "assigned": assigned,
+        "members_added": [v for k, v in members_after.items() if k not in members_before],
+        "members_removed": [v for k, v in members_before.items() if k not in members_after],
     }
 
 
 EMPTY_DIFF = {"created": [], "deleted": [], "updated": [], "other_created": [],
-              "other_deleted": [], "other_updated": [], "docs_created": 0}
+              "other_deleted": [], "other_updated": [], "docs_created": 0,
+              "assigned": [], "members_added": [], "members_removed": []}
 
 
 def compute_route(message: str, project_id: int | None, project_name: str | None) -> str:
@@ -280,26 +348,75 @@ def compute_route(message: str, project_id: int | None, project_name: str | None
 
 
 # ---------- 单条用例 ----------
+def _seed_pending_assignment(project_id: int | None) -> None:
+    """离线模式准备「待确认方案」：不调模型，只塞一条 pending 记录用来验路由（零 token）。"""
+    if project_id is None:
+        return
+    from models.database import AssignmentRun, SessionLocal
+
+    db = SessionLocal()
+    try:
+        db.add(AssignmentRun(project_id=project_id, user_id=USER_ID,
+                             items="[]", status="pending"))
+        db.commit()
+    finally:
+        db.close()
+
+
+def _seed_prior_conversation(project_id: int | None) -> None:
+    """给「把刚才的结论存成纪要」这类用例一段前置对话。
+
+    夹具每条用例都会清空历史，于是"刚才"没有指代对象——模型拒绝凭空编一份纪要
+    其实是**正确行为**（评测基线里 w11 就是这么暴露出来的）。给它一段真实的前置对话，
+    这条用例才真的在测「会不会把结论沉淀下来」。
+    """
+    from models.database import ChatMessage, SessionLocal
+
+    db = SessionLocal()
+    try:
+        db.add(ChatMessage(role="user", user_id=USER_ID, project_id=project_id,
+                           content="登录方案定了：JWT + 短信验证码双因子；灰度先覆盖 3 个城市。"))
+        db.add(ChatMessage(role="assistant", user_id=USER_ID, project_id=project_id,
+                           content="已记下这个结论：登录方案采用 JWT + 短信验证码双因子，"
+                                   "灰度发布先覆盖 3 个城市。"))
+        db.commit()
+    finally:
+        db.close()
+
+
 def run_case(client, fixture: Fixture, case: dict, mode: str) -> dict:
     fixture.reset()
-    before = fixture.snapshot()
     bound = case.get("bound", True)
     project_id = fixture.main_id if bound else None
+    # 可选前置：有些用例的前提是"上一步已经出过方案"（如确认落库）
+    if case.get("setup") == "plan_assignment":
+        if mode == "live":
+            from core.agent import _ToolExecutor
+
+            _ToolExecutor(user_id=USER_ID, project_id=project_id).plan_assignment_from_doc()
+        else:
+            _seed_pending_assignment(project_id)
+    elif case.get("setup") == "prior_conversation":
+        _seed_prior_conversation(project_id)
+    before = fixture.snapshot()
 
     run = {
         "route": compute_route(case["message"], project_id,
                                fixture.main_name if bound else None),
         "tools": [],
+        "tool_errors": [],
         "reply": "",
         "ms": 0,
         "error": None,
         "llm_calls": 0,
+        "tokens": {"in": 0, "out": 0},
     }
     if mode == "offline":
         run["write"] = dict(EMPTY_DIFF)
         return run
 
     calls0 = LLM_STATS["calls"]
+    tok0 = (LLM_STATS["prompt_tokens"], LLM_STATS["completion_tokens"])
     t0 = time.time()
     try:
         r = client.post("/api/chat/send", json={
@@ -307,11 +424,15 @@ def run_case(client, fixture: Fixture, case: dict, mode: str) -> dict:
         r.raise_for_status()
         body = r.json()
         run["reply"] = body.get("reply") or ""
-        run["tools"] = [s.get("tool") for s in (body.get("trace") or [])]
+        trace = body.get("trace") or []
+        run["tools"] = [s.get("tool") for s in trace]
+        run["tool_errors"] = [s.get("tool") for s in trace if s.get("ok") is False]
     except Exception as exc:  # 网络/接口异常：记为错误用例，不中断整轮
         run["error"] = f"{type(exc).__name__}: {exc}"
     run["ms"] = int((time.time() - t0) * 1000)
     run["llm_calls"] = LLM_STATS["calls"] - calls0
+    run["tokens"] = {"in": LLM_STATS["prompt_tokens"] - tok0[0],
+                     "out": LLM_STATS["completion_tokens"] - tok0[1]}
     run["write"] = diff_snapshots(before, fixture.snapshot())
 
     repeat = int(case.get("repeat", 1))
@@ -376,8 +497,10 @@ def evaluate(case: dict, run: dict, mode: str = "live") -> tuple[dict, list[str]
     d = run["write"]
     n_created, n_deleted = len(d["created"]), len(d["deleted"])
     n_updated, n_docs = len(d["updated"]), d["docs_created"]
+    n_assigned = len(d.get("assigned") or [])
+    n_members = len(d.get("members_added") or [])
     if mode == "none":
-        ok = not (n_created or n_deleted or n_updated or n_docs)
+        ok = not (n_created or n_deleted or n_updated or n_docs or n_assigned or n_members)
     elif mode == "create":
         ok = w.get("min", 1) <= n_created <= w.get("max", 99)
         if not ok:
@@ -394,6 +517,21 @@ def evaluate(case: dict, run: dict, mode: str = "live") -> tuple[dict, list[str]
         ok = n_docs >= w.get("min", 1)
         if not ok:
             reasons.append(f"新增文档 {n_docs} 篇／期望 ≥{w.get('min',1)}")
+    elif mode == "assign":
+        # 指派：只允许改负责人（D-005：状态不能跟着变）
+        ok = w.get("min", 1) <= n_assigned <= w.get("max", 99) and not n_updated
+        if not ok:
+            reasons.append(f"改派 {n_assigned} 条／期望 {w.get('min',1)}~{w.get('max',99)}"
+                           + ("（同时改了状态/字段：指派不该动它们）" if n_updated else ""))
+    elif mode == "member":
+        ok = n_members >= w.get("min", 1)
+        if not ok:
+            reasons.append(f"新增成员 {n_members} 人／期望 ≥{w.get('min',1)}")
+    elif mode == "assign_or_member":
+        # 允许两条路：名册里有人就直接派，没有就先建占位成员再派
+        ok = (n_assigned >= 1 and n_members >= 1) or n_assigned >= 1 or n_members >= 1
+        if not ok:
+            reasons.append("既没改派也没建成员／期望至少发生一件")
     else:
         ok = True
     if d["other_created"] or d["other_deleted"] or d["other_updated"]:
@@ -401,10 +539,12 @@ def evaluate(case: dict, run: dict, mode: str = "live") -> tuple[dict, list[str]
         run["cross_project"] = True
         reasons.append("写到了非绑定项目：" + "、".join(
             d["other_created"] + d["other_deleted"] + d["other_updated"]))
-    if mode == "none" and (n_created or n_deleted or n_updated or n_docs):
+    if mode == "none" and (n_created or n_deleted or n_updated or n_docs or n_assigned or n_members):
         run["unexpected_write"] = True
         reasons.append("不该写库却写了：" + "、".join(
-            (d["created"] + d["deleted"] + d["updated"])[:3] or [f"新增 {n_docs} 篇文档"]))
+            (d["created"] + d["deleted"] + d["updated"] + (d.get("assigned") or [])
+             + (d.get("members_added") or []))[:3]
+            or [f"新增 {n_docs} 篇文档"]))
     checks["write"] = ok
 
     # 4) 回复内容
@@ -488,6 +628,8 @@ def summarize(results: list[dict], cases: list[dict], mode: str) -> dict:
         "prompt_tokens": LLM_STATS["prompt_tokens"],
         "completion_tokens": LLM_STATS["completion_tokens"],
         "avg_ms": int(sum(r["run"]["ms"] for r in results) / total) if total else 0,
+        "tool_errors": sum(len(r["run"].get("tool_errors") or []) for r in results),
+        "cases_with_tool_error": sum(1 for r in results if r["run"].get("tool_errors")),
     }
 
 
@@ -520,15 +662,18 @@ def render_markdown(meta: dict, results: list[dict], summary: dict) -> str:
         f"- 模型调用：{summary['llm_calls']} 次　"
         f"token：{summary['prompt_tokens']} in / {summary['completion_tokens']} out",
         f"- 平均耗时：{summary['avg_ms']} ms",
+        f"- 工具选择正确率：{summary['dim'].get('tools', '—')}　"
+        f"工具报错：{summary['tool_errors']} 次（涉及 {summary['cases_with_tool_error']} 条用例）",
         "",
-        "| 用例 | 分类 | 期望路由 | 实际路由 | 工具 | 结果 | 失败原因 |",
-        "|---|---|---|---|---|---|---|",
+        "| 用例 | 分类 | 期望路由 | 实际路由 | 工具 | 工具错误 | 结果 | 失败原因 |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
         c = r["case"]
         lines.append(
             f"| {c['id']} | {c['category']} | {'/'.join(c['expect'].get('route', ['-']))} | "
             f"{r['run']['route']} | {','.join(t for t in r['run']['tools'] if t) or '-'} | "
+            f"{','.join(r['run'].get('tool_errors') or []) or '-'} | "
             f"{'PASS' if not r['reasons'] else 'FAIL'}{'（已知短板）' if r['known_gap'] else ''} | "
             f"{'；'.join(r['reasons']) or '-'} |")
     lines += [
@@ -660,6 +805,9 @@ def main() -> int:
               f"　越权写库：{summary['cross_project_writes']}")
         print(f"模型调用 {summary['llm_calls']} 次　token {summary['prompt_tokens']} in / "
               f"{summary['completion_tokens']} out　平均耗时 {summary['avg_ms']} ms")
+        print(f"工具选择正确率：{summary['dim'].get('tools', '—')}　"
+              f"工具报错 {summary['tool_errors']} 次"
+              f"（涉及 {summary['cases_with_tool_error']} 条用例）")
     print(f"\n报告：{md_path}\n      {json_path}")
     if not args.keep:
         shutil.rmtree(workdir / "chroma", ignore_errors=True)
