@@ -108,7 +108,7 @@
         >
           <i class="ws-mark" aria-hidden="true" />
           <span class="ws-filename">{{ doc.title }}</span>
-          <span class="ws-filenote">{{ doc.doc_type || '文档' }}</span>
+          <span class="ws-filenote">{{ docTypeLabel(doc.doc_type) }}</span>
         </button>
         <div v-if="!documents.length" class="ws-empty-small">
           {{ store.currentId ? '这个项目还没有记忆文档' : '先在顶部选一个项目' }}
@@ -180,7 +180,7 @@ import { useProjectStore } from '../stores/project'
 import ChatPanel from '../components/workspace/ChatPanel.vue'
 import LivePanel from '../components/workspace/LivePanel.vue'
 import MemberRoster from '../components/workspace/MemberRoster.vue'
-import { DOC_PREVIEW_CHARS, FONT_SCALES, STATUS, isBlocked, repoDocs }
+import { DOC_PREVIEW_CHARS, FONT_SCALES, STATUS, docTypeLabel, isBlocked, repoDocs }
   from '../components/workspace/constants.js'
 
 const store = useProjectStore()

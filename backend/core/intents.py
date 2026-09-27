@@ -6,7 +6,7 @@
 import re
 from typing import Optional
 
-from models.database import AssignmentRun
+from models.database import AssignmentRun, NoteDraft
 from services import project_service
 
 
@@ -145,6 +145,55 @@ def has_pending_assignment(db, user_id: int, project_id: int) -> bool:
             .order_by(AssignmentRun.id.desc()).first()) is not None
 
 
+# ---------- 记忆闭环：认「这是个决定」，先拟稿、确认后入库（D-027） ----------
+# 用户自己把话"定下来"的说法。注意与「记下来/存成纪要」区分：后者是显式归档，
+# 由模型直接调 save_meeting 写库，不需要再走草稿确认。
+_CONCLUSION_HINT = re.compile(
+    r"就这么定|就这么办|说定了|定下来|确定为|统一为|统一用|约定|结论是|"
+    r"我们决定|决定采用|拍板|以后都|从今往后|规矩定|这个方案定")
+_ARCHIVE_HINT = re.compile(r"纪要|归档|存进资料库|记进资料库|记下来|存档|沉淀一下")
+# 确认/放弃都只认短句：长篇大论里的"存"字不算（和 apply 的判法一致）
+_NOTE_CONFIRM_HINT = re.compile(
+    r"^(?:存|存吧|存入|记吧|记下来|好|好的|行|可以|嗯|对|确认|就这样|同意)[，,。!！\s]*$")
+_NOTE_DISCARD_HINT = re.compile(
+    r"^(?:不用|不用了|算了|别记|别记了|不存|不要|取消|撤回|删掉这条笔记)[，,。!！\s]*$")
+
+
+def is_conclusion_intent(text: str) -> bool:
+    """用户把一件事"定下来"了 → 值得沉淀成一条笔记（先拟稿，确认后入库）。
+
+    故意窄：既要命中"定下来"的说法，又要排除显式归档语（那条走 save_meeting）、
+    排除疑问句（"定了吗？"）。宁可不记，也不要刷一库噪音。
+    """
+    t = (text or "").strip()
+    if not t or len(t) > 120:
+        return False
+    if _ARCHIVE_HINT.search(t):
+        return False
+    if t.endswith(("？", "?")):
+        return False
+    return bool(_CONCLUSION_HINT.search(t))
+
+
+def is_note_confirm_intent(text: str) -> bool:
+    """「存 / 记下来 / 好」这种一句话确认（只在真有草稿时才生效）。"""
+    t = (text or "").strip()
+    return bool(t) and len(t) <= 12 and bool(_NOTE_CONFIRM_HINT.match(t))
+
+
+def is_note_discard_intent(text: str) -> bool:
+    """「不用了 / 算了 / 别记」这种一句话放弃。"""
+    t = (text or "").strip()
+    return bool(t) and len(t) <= 12 and bool(_NOTE_DISCARD_HINT.match(t))
+
+
+def has_pending_note(db, user_id: int, project_id: int) -> bool:
+    """该项目有没有一份还没确认的结论笔记草稿。"""
+    return (db.query(NoteDraft)
+            .filter_by(user_id=user_id, project_id=project_id, status="pending")
+            .order_by(NoteDraft.id.desc()).first()) is not None
+
+
 def resolve_bound_action(db, user_id: int, bound_project_id: Optional[int],
                          bound_project_name: Optional[str], message: str):
     """绑定项目场景下，把「高确定性」的情况在进入 LLM 前先用代码判定：
@@ -172,6 +221,14 @@ def resolve_bound_action(db, user_id: int, bound_project_id: Optional[int],
         return ("assign_plan", None)
     if has_pending_assignment(db, user_id, bound_project_id) and is_apply_assignment_intent(message):
         return ("apply", None)
+    # 记忆闭环：先看有没有草稿等着"存/不用"，再看这句话本身是不是个结论
+    if has_pending_note(db, user_id, bound_project_id):
+        if is_note_discard_intent(message):
+            return ("note_discard", None)
+        if is_note_confirm_intent(message):
+            return ("note_confirm", None)
+    if is_conclusion_intent(message):
+        return ("note_draft", None)
     if is_plan_intent(message):
         return ("plan", None)
     if is_ask_detail_intent(message):

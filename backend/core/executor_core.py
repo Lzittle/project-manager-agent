@@ -7,7 +7,7 @@ from core import llm
 from core.rag import search as rag_search
 from core.utils import PRI_CN, brief_error, clip
 from models.database import (SessionLocal, Project, Task, PlanRun, AssignmentRun,
-                             KnowledgeDocument, Member)
+                             KnowledgeDocument, Member, NoteDraft)
 from services import knowledge_service, member_service, project_service, task_service
 
 
@@ -293,3 +293,92 @@ class _CoreToolMixin:
         finally:
             db.close()
 
+    # ---------- 记忆闭环：结论笔记（D-027） ----------
+    NOTE_DEDUP_MIN = 10  # 同一个标题 10 分钟内重复确认 → 视为重复，不再入库
+
+    def draft_note(self, text: str) -> dict:
+        """把用户刚说定的结论拟成一条笔记草稿（**不写库**，等一句确认）。
+
+        为什么先拟稿：自动沉淀最怕的不是漏记，而是刷一库噪音（roadmap 阶段 2）。
+        同一项目同时只保留一条待确认草稿，避免用户连说几句攒一堆。
+        """
+        t = (text or "").strip()
+        if not t:
+            return {"ok": False, "error": "没听清要沉淀什么内容"}
+        pid = self.project_id
+        if pid is None:
+            return {"ok": False, "error": "未指定项目：请先绑定项目"}
+        now = datetime.now()
+        title = f"{now:%Y-%m-%d} 结论：{t[:24]}"
+        content = (f"【结论】{t}\n"
+                   f"【时间】{now:%Y-%m-%d %H:%M}\n"
+                   f"【来源】工作台对话（用户确认后由 Agent 记入项目记忆）")
+        db = SessionLocal()
+        try:
+            # 上一份还没确认的草稿直接作废：只跟最近这句话走
+            db.query(NoteDraft).filter_by(project_id=pid, user_id=self.user_id,
+                                          status="pending").delete(synchronize_session=False)
+            d = NoteDraft(project_id=pid, user_id=self.user_id,
+                          title=title[:200], content=content)
+            db.add(d)
+            db.commit()
+            db.refresh(d)
+            return {"ok": True, "data": {"id": d.id, "title": title, "content": content},
+                    "note": "草稿已备好（还没入库）：确认后写进项目记忆，说「不用」就丢掉"}
+        finally:
+            db.close()
+
+    def save_note(self) -> dict:
+        """把待确认的笔记草稿写进项目记忆（doc_type=note，会被向量化 → 之后可检索）。"""
+        db = SessionLocal()
+        try:
+            q = db.query(NoteDraft).filter_by(user_id=self.user_id, status="pending")
+            if self.project_id is not None:
+                q = q.filter(NoteDraft.project_id == self.project_id)
+            d = q.order_by(NoteDraft.id.desc()).first()
+            if d is None:
+                return {"ok": False, "error": "没有待确认的笔记：先说一句「就这么定：…」我再拟"}
+            # 去重看的是"上一份已保存的草稿"——NoteDraft.created_at 是 Python 侧时钟，
+            # 与 datetime.now() 同源；knowledge_documents 用的是 SQLite 的 UTC 默认值，
+            # 拿它算年龄会差 8 小时（踩过一次的坑，见 D-015 的同类教训）。
+            recent = (db.query(NoteDraft)
+                      .filter(NoteDraft.project_id == d.project_id,
+                              NoteDraft.title == d.title,
+                              NoteDraft.status == "saved")
+                      .order_by(NoteDraft.id.desc()).first())
+            if recent is not None and recent.created_at is not None:
+                age_min = (datetime.now() - recent.created_at).total_seconds() / 60
+                if 0 <= age_min < self.NOTE_DEDUP_MIN:
+                    d.status = "saved"
+                    db.commit()
+                    return {"ok": True, "skipped": True,
+                            "data": {"id": recent.id, "title": recent.title},
+                            "note": f"《{recent.title}》{int(age_min)} 分钟前刚记过，本次没重复入库"}
+            doc = knowledge_service.create_document(
+                db, d.project_id, d.title, d.content, file_type="txt", doc_type="note")
+            if doc is None:
+                return {"ok": False, "error": f"项目 {d.project_id} 不存在"}
+            d.status = "saved"
+            db.commit()
+            return {"ok": True,
+                    "data": {"id": doc.id, "title": doc.title, "project_id": d.project_id},
+                    "note": "已写进项目记忆（自动向量化），之后问「上次定的…」会被检索到"}
+        finally:
+            db.close()
+
+    def discard_note(self) -> dict:
+        """丢掉待确认的草稿（用户说「不用了」）。"""
+        db = SessionLocal()
+        try:
+            q = db.query(NoteDraft).filter_by(user_id=self.user_id, status="pending")
+            if self.project_id is not None:
+                q = q.filter(NoteDraft.project_id == self.project_id)
+            d = q.order_by(NoteDraft.id.desc()).first()
+            if d is None:
+                return {"ok": True, "data": {"discarded": 0}, "note": "没有待确认的笔记，不用处理"}
+            d.status = "discarded"
+            db.commit()
+            return {"ok": True, "data": {"discarded": 1, "title": d.title},
+                    "note": "好，不记这条了（草稿已作废，没有写进项目记忆）"}
+        finally:
+            db.close()

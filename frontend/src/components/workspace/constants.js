@@ -29,6 +29,11 @@ export const STATUS = {
 
 export const DOC_PREVIEW_CHARS = 1500  // 资产库预览最多渲染多少字（超出部分靠框内滚动）
 
+// 文档类型标签（doc_type 现在是三种：资料 / 会议纪要 / 对话里确认的结论笔记）
+export function docTypeLabel(t) {
+  return { doc: '文档', meeting: '会议纪要', note: '结论笔记' }[t] || t || '文档'
+}
+
 export function statusOf(t) {
   return STATUS[t.status] || { label: t.status, dot: 'todo', col: t.status }
 }

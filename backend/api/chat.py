@@ -74,6 +74,26 @@ def _format_apply_reply(res: dict, project_name: str | None) -> str:
     return out
 
 
+def _format_note_draft(res: dict) -> str:
+    """拟好草稿 → 问一句要不要记（阶段 2 记忆闭环：写前给一句话确认，避免刷噪音）。"""
+    if not res.get("ok"):
+        return f"没能拟出笔记：{res.get('error', '未知错误')}"
+    d = res.get("data") or {}
+    return (f"这句话听着像个决定，我拟成一条笔记：\n\n"
+            f"《{d.get('title', '')}》\n{d.get('content', '')}\n\n"
+            f"要记进项目记忆就说「存」，不用就说「不用」。")
+
+
+def _format_note_saved(res: dict, project_name: str | None) -> str:
+    if not res.get("ok"):
+        return f"没能记下来：{res.get('error', '未知错误')}"
+    if res.get("skipped"):
+        return res.get("note") or "这条刚才已经记过了，没有重复入库。"
+    d = res.get("data") or {}
+    return (f"已记进「{project_name or '这个项目'}」的项目记忆：《{d.get('title', '')}》"
+            f"——之后问「上次定的…」，我会检索到它。")
+
+
 def _format_snapshot_note(snap: dict) -> str:
     """把项目状态快照压成给模型的 system 上下文（真实数据，禁止编造）。"""
     d = snap.get("data", {})
@@ -283,6 +303,26 @@ def chat_send(body: ChatRequest, db: Session = Depends(get_db)):
             _ms = int((time.time() - _t0) * 1000)
             trace = [agent.executor.summarize_tool("apply_assignment", {}, res, _ms)]
             reply = _format_apply_reply(res, agent.executor.project_name)
+        elif action == "note_draft":
+            # 记忆闭环：认出"这是个决定" → 先拟稿，不写库（D-027）
+            _t0 = time.time()
+            res = agent.executor.draft_note(body.message)
+            _ms = int((time.time() - _t0) * 1000)
+            trace = [agent.executor.summarize_tool("draft_note", {"text": body.message},
+                                                   res, _ms)]
+            reply = _format_note_draft(res)
+        elif action == "note_confirm":
+            _t0 = time.time()
+            res = agent.executor.save_note()
+            _ms = int((time.time() - _t0) * 1000)
+            trace = [agent.executor.summarize_tool("save_note", {}, res, _ms)]
+            reply = _format_note_saved(res, agent.executor.project_name)
+        elif action == "note_discard":
+            _t0 = time.time()
+            res = agent.executor.discard_note()
+            _ms = int((time.time() - _t0) * 1000)
+            trace = [agent.executor.summarize_tool("discard_note", {}, res, _ms)]
+            reply = res.get("note") or "好，不记这条了。"
         elif action == "query":
             # 只读进度查询：代码层先读真实项目状态注入上下文，
             # 模型只能基于数据作答——杜绝「不查库直接泛泛而谈/编造进度」。

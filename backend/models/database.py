@@ -283,3 +283,21 @@ class AssignmentRun(Base):
     status = Column(String(20), default="pending", index=True)  # pending=待确认 / applied=已落库
     applied_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.now, index=True)
+
+
+class NoteDraft(Base):
+    """结论笔记草稿：Agent 从对话里认出「这是个决定」后先拟一份，等用户一句话确认再入库。
+
+    为什么要有草稿态（D-027）：自动沉淀最大的风险不是"少记"，而是"记满噪音"。
+    所以落库前给人一眼话；确认后写进 knowledge_documents（doc_type=note），
+    它和资料/纪要一样会被向量化 —— 这样"记下的事"下次能被检索到，记忆才闭环。
+    """
+    __tablename__ = "note_drafts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String(200), nullable=False)
+    content = Column(Text, nullable=False)
+    status = Column(String(20), default="pending", index=True)  # pending / saved / discarded
+    created_at = Column(DateTime, default=datetime.now, index=True)

@@ -258,11 +258,12 @@ class Fixture:
     @staticmethod
     def _clear_assignments() -> None:
         """清掉上一轮留下的分配方案（pending 会影响「确认」这类用例的路由判定）。"""
-        from models.database import AssignmentRun, SessionLocal
+        from models.database import AssignmentRun, NoteDraft, SessionLocal
 
         db = SessionLocal()
         try:
             db.query(AssignmentRun).delete()
+            db.query(NoteDraft).delete()      # 笔记草稿同理：留着会改变「存/不用」的路由
             db.commit()
         finally:
             db.close()
@@ -396,6 +397,22 @@ def _seed_prior_conversation(project_id: int | None) -> None:
         db.close()
 
 
+def _seed_note(project_id: int | None, save: bool = False) -> None:
+    """给记忆闭环用例准备状态：先拟一条结论草稿；save=True 时再"存"进项目记忆。
+
+    走的是真执行器（不是直接写表），所以测的就是线上那条路径。
+    save=True 会触发向量化 —— 只有 live 模式才传 True。
+    """
+    if project_id is None:
+        return
+    from core.agent import _ToolExecutor
+
+    ex = _ToolExecutor(user_id=USER_ID, project_id=project_id)
+    ex.draft_note("登录方案采用 JWT + 短信验证码双因子")
+    if save:
+        ex.save_note()
+
+
 def run_case(client, fixture: Fixture, case: dict, mode: str) -> dict:
     fixture.reset()
     bound = case.get("bound", True)
@@ -410,6 +427,11 @@ def run_case(client, fixture: Fixture, case: dict, mode: str) -> dict:
             _seed_pending_assignment(project_id)
     elif case.get("setup") == "prior_conversation":
         _seed_prior_conversation(project_id)
+    elif case.get("setup") == "note_draft":
+        _seed_note(project_id)
+    elif case.get("setup") == "note_saved":
+        # 离线模式不调 embedding：只塞草稿，够验路由
+        _seed_note(project_id, save=(mode == "live"))
     before = fixture.snapshot()
 
     run = {

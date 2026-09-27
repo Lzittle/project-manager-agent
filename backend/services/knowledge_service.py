@@ -21,7 +21,7 @@ def create_document(
     from models.database import Project
     if db.get(Project, project_id) is None:
         return None
-    if doc_type not in ("doc", "meeting"):
+    if doc_type not in ("doc", "meeting", "note"):   # note = 对话里确认过的结论笔记（D-027）
         doc_type = "doc"
 
     doc = KnowledgeDocument(title=title, content=content,

@@ -15,6 +15,8 @@ class _TraceToolMixin:
         "update_task_fields": "编辑任务", "update_project_fields": "编辑项目",
         "project_snapshot": "读取项目状态", "save_meeting": "保存会议纪要",
         "list_members": "查看成员名册", "create_member": "添加成员",
+        "draft_note": "拟一条结论笔记", "save_note": "记进项目记忆",
+        "discard_note": "丢弃笔记草稿",
         "assign_task": "指派任务", "plan_assignment_from_doc": "按名单拟分配方案",
         "apply_assignment": "落库分配方案",
     }
@@ -105,6 +107,13 @@ class _TraceToolMixin:
             extra = len(result.get("created_members") or [])
             detail = (f"落库 {len(data)} 条指派"
                       + (f"，新建 {extra} 个占位成员" if extra else ""))
+        elif name == "draft_note" and isinstance(data, dict):
+            detail = f"拟好草稿《{data.get('title', '')}》（待确认，未入库）"
+        elif name == "save_note" and isinstance(data, dict):
+            detail = (result.get("note") if result.get("skipped")
+                      else f"《{data.get('title', '')}》已记进项目记忆")
+        elif name == "discard_note" and isinstance(data, dict):
+            detail = "草稿已作废，没有写进项目记忆"
         else:
             detail = f"{label}完成"
         step = {"tool": name, "label": label, "detail": clip(detail, 120),
@@ -113,4 +122,3 @@ class _TraceToolMixin:
         if refs:
             step["refs"] = refs
         return step
-

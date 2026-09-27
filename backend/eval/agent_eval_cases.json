@@ -7,7 +7,7 @@
     "expect.must_call_any": "每组至少命中一个工具（AND of OR）",
     "expect.must_not_call": "禁止调用的工具",
     "expect.write.mode": "none / create / update / delete / doc / assign(改负责人) / member(加成员) / assign_or_member",
-    "setup": "可选：跑该用例前先做的准备｜plan_assignment（先生成一份待确认方案；offline 用直连 DB 的假方案，零 token）｜prior_conversation（先塞一段前置对话，让「刚才的结论」有指代）",
+    "setup": "可选：跑该用例前先做的准备｜plan_assignment（先生成一份待确认方案；offline 用直连 DB 的假方案，零 token）｜prior_conversation（先塞一段前置对话，让「刚才的结论」有指代）｜note_draft（先拟一条结论笔记草稿）｜note_saved（再把它存进项目记忆，仅 live 会向量化）",
     "expect.reply_contains_any": "回复里至少出现其中一个关键词",
     "known_gap": "true=已知的现有短板（基线先记录，用来观察改没改好）",
     "repeat": "整条用例重复发送的次数，用于测幂等"
@@ -961,6 +961,84 @@
       },
       "known_gap": false,
       "note": "问概念不是让你去指派"
+    },
+    {
+      "id": "memo01_conclusion_draft",
+      "category": "记忆闭环",
+      "bound": true,
+      "message": "就这么定：登录方案用 JWT + 短信验证码双因子",
+      "expect": {
+        "route": ["note_draft"],
+        "must_call_any": [["draft_note"]],
+        "must_not_call": ["save_meeting", "plan_tasks"],
+        "write": {"mode": "none"},
+        "reply_contains_any": ["存", "不用"]
+      },
+      "known_gap": false,
+      "note": "认出「这是个决定」→ 只拟稿，一个字都不写库（写前给一句话确认）"
+    },
+    {
+      "id": "memo02_confirm_saves_note",
+      "category": "记忆闭环",
+      "bound": true,
+      "setup": "note_draft",
+      "message": "存",
+      "expect": {
+        "route": ["note_confirm"],
+        "must_call_any": [["save_note"]],
+        "must_not_call": ["save_meeting", "create_task"],
+        "write": {"mode": "doc", "min": 1},
+        "reply_contains_any": ["项目记忆"]
+      },
+      "known_gap": false,
+      "note": "一句话确认 → 写进项目记忆（doc_type=note，会被向量化）"
+    },
+    {
+      "id": "memo03_discard_draft",
+      "category": "记忆闭环",
+      "bound": true,
+      "setup": "note_draft",
+      "message": "不用了",
+      "expect": {
+        "route": ["note_discard"],
+        "must_call_any": [["discard_note"]],
+        "must_not_call": ["save_note", "save_meeting"],
+        "write": {"mode": "none"},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "说不用就丢弃，项目记忆里不留东西"
+    },
+    {
+      "id": "memo04_statement_is_not_conclusion",
+      "category": "记忆闭环",
+      "bound": true,
+      "message": "这个任务还得再打磨一下，先把登录联调收尾",
+      "expect": {
+        "route": ["agent"],
+        "must_call_any": [],
+        "must_not_call": ["save_meeting", "draft_note", "save_note"],
+        "write": {"mode": "none"},
+        "reply_contains_any": []
+      },
+      "known_gap": false,
+      "note": "普通陈述不是决定：不许拟稿、更不许存（宁可不记，也别刷噪音）"
+    },
+    {
+      "id": "memo05_recall_saved_note",
+      "category": "记忆闭环",
+      "bound": true,
+      "setup": "note_saved",
+      "message": "我们上次定的登录方案是什么？",
+      "expect": {
+        "route": ["query", "agent"],
+        "must_call_any": [["search_knowledge", "project_snapshot"]],
+        "must_not_call": ["save_meeting", "draft_note", "create_task"],
+        "write": {"mode": "none"},
+        "reply_contains_any": ["JWT"]
+      },
+      "known_gap": false,
+      "note": "记忆闭环的闭环：先存进去，隔一会儿问，能被检索出来复述"
     }
   ]
 }
