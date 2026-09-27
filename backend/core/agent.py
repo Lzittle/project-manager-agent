@@ -21,7 +21,7 @@ from typing import Any, Optional
 from core import llm
 from core.rag import search as rag_search
 from models.database import (SessionLocal, Project, Task, PlanRun, AssignmentRun,
-                             KnowledgeDocument)
+                             KnowledgeDocument, Member)
 from services import knowledge_service, member_service, project_service, task_service
 
 MAX_ITER = 8  # 单轮最多工具迭代次数，防死循环
@@ -34,6 +34,18 @@ def _clip(v: Any, limit: int = 120) -> str:
     """把任意值压成适合展示的短字符串（截断超长文本/参数）。"""
     s = json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v
     return s if len(s) <= limit else s[:limit] + "…"
+
+
+def _brief_error(exc: Exception, hint: str = "") -> str:
+    """把异常压成「类型 + 一句关键信息 +（可选）建议」。
+
+    12-Factor Agents ⑨：错误要压缩后再回填上下文。原样把堆栈喂回去既烧 token，
+    又会把模型带偏——它会开始分析堆栈，而不是换个办法把事办成。
+    """
+    raw = str(exc).strip()
+    first = raw.splitlines()[0] if raw else ""
+    text = f"{type(exc).__name__}：{_clip(first, 140)}" if first else type(exc).__name__
+    return f"{text}｜建议：{hint}" if hint else text
 
 def build_system_prompt(project_id: Optional[int] = None,
                         project_name: Optional[str] = None) -> str:
@@ -283,8 +295,15 @@ TOOLS: list[dict] = [
     _fn(
         "list_tasks",
         "列出指定项目下的任务。用于用户问「XX 项目的任务有哪些/任务列表」。"
+        "默认最多回 40 条（每条只有 id/标题/状态/优先级/负责人，不含描述），"
+        "返回里的 total/shown 说明一共多少条、这次给了多少条；"
+        "要翻页带 offset，只看某种状态带 status。"
         "project_id 可省略：省略时默认当前绑定的项目（若未绑定则必须提供）",
-        {"project_id": {"type": "integer", "description": "项目 id（可省略，默认当前绑定项目）"}},
+        {"project_id": {"type": "integer", "description": "项目 id（可省略，默认当前绑定项目）"},
+         "status": {"type": "string", "enum": ["todo", "doing", "done"],
+                    "description": "只看某种状态（可省略）"},
+         "limit": {"type": "integer", "description": "本次最多回多少条（默认 40，上限 200）"},
+         "offset": {"type": "integer", "description": "从第几条开始（默认 0，用于翻页）"}},
         [],
     ),
     _fn(
@@ -461,6 +480,9 @@ def build_tools(project_id: Optional[int] = None) -> list[dict]:
 class _ToolExecutor:
     # 同一项目重复规划的复用窗口（秒）：窗口内重复触达 → 复用上一批，不再新建
     PLAN_DEDUP_WINDOW_SEC = 300
+    # 任务列表瘦身：一次默认回多少条、上限多少（模型可带 limit/offset 翻页）
+    TASK_LIST_LIMIT = 40
+    TASK_LIST_MAX = 200
 
     def __init__(self, user_id: int, project_id: Optional[int] = None):
         self.user_id = user_id
@@ -481,9 +503,17 @@ class _ToolExecutor:
         return {"id": p.id, "name": p.name, "description": p.description,
                 "status": p.status, "task_count": len(p.tasks)}
 
-    def _task_brief(self, t) -> dict:
-        return {"id": t.id, "title": t.title, "description": t.description,
-                "status": t.status, "priority": t.priority}
+    def _task_brief(self, t, assignee_name: Optional[str] = None) -> dict:
+        """任务瘦身版（给模型看的）：只留"找 id / 看状态 / 认人"要用的字段。
+
+        刻意不带 description —— 一条描述动辄上百字，模型在选任务、报进度时用不上，
+        却会成倍推高每一轮 token（Anthropic《Writing effective tools for agents》的原则：
+        工具返回要有意义、要对 token 友好）。
+        """
+        d = {"id": t.id, "title": t.title, "status": t.status, "priority": t.priority}
+        if assignee_name:
+            d["assignee"] = assignee_name
+        return d
 
     def list_projects(self) -> dict:
         db = SessionLocal()
@@ -502,14 +532,36 @@ class _ToolExecutor:
         finally:
             db.close()
 
-    def list_tasks(self, project_id: Optional[int] = None) -> dict:
+    def list_tasks(self, project_id: Optional[int] = None, status: Optional[str] = None,
+                   limit: Optional[int] = None, offset: int = 0) -> dict:
+        """列任务：默认最多 40 条，可按状态过滤、可翻页。
+
+        返回里带 total / shown：模型据此知道"还有没有没看到的"，需要时自己带 offset 再查，
+        而不是一次把几百条任务灌进上下文。
+        """
         pid = project_id or self.project_id
         if pid is None:
             return {"ok": False, "error": "未指定项目：请先绑定项目或在话术中说明项目名称"}
         db = SessionLocal()
         try:
-            data = [self._task_brief(t) for t in task_service.list_tasks(db, pid)]
-            return {"ok": True, "data": data}
+            rows = task_service.list_tasks(db, pid)  # 已按 id 倒序（新的在前）
+            if status in ("todo", "doing", "done"):
+                rows = [t for t in rows if t.status == status]
+            total = len(rows)
+            cap = max(1, min(int(limit or self.TASK_LIST_LIMIT), self.TASK_LIST_MAX))
+            off = max(0, int(offset or 0))
+            page = rows[off:off + cap]
+            ids = {t.assignee_id for t in page if t.assignee_id}
+            names = {}
+            if ids:
+                names = {m.id: m.name
+                         for m in db.query(Member).filter(Member.id.in_(ids)).all()}
+            data = [self._task_brief(t, names.get(t.assignee_id)) for t in page]
+            res = {"ok": True, "data": data, "total": total, "shown": len(data)}
+            if off + len(data) < total:
+                res["note"] = (f"共 {total} 条，本次回了 {len(data)} 条（offset={off}）；"
+                               "需要更多请带 offset 再查，或按 status 过滤")
+            return res
         finally:
             db.close()
 
@@ -685,7 +737,8 @@ class _ToolExecutor:
             return {"ok": True, "data": [
                 {"title": h["title"], "text": h["text"][:500]} for h in hits]}
         except Exception as e:  # embedding 模型未就绪等场景
-            return {"ok": False, "error": f"知识库检索失败: {e}"}
+            return {"ok": False,
+                    "error": "知识库检索失败：" + _brief_error(e, "稍后重试；也可以直接说任务明细")}
 
     def save_meeting(self, title: str, content: str,
                      project_id: Optional[int] = None) -> dict:
@@ -781,7 +834,10 @@ class _ToolExecutor:
         elif name == "list_projects" and isinstance(data, list):
             detail = f"共 {len(data)} 个项目"
         elif name == "list_tasks" and isinstance(data, list):
-            detail = f"共 {len(data)} 个任务"
+            total = result.get("total", len(data))
+            shown = result.get("shown", len(data))
+            detail = (f"共 {total} 个任务" if total == shown
+                      else f"共 {total} 个任务，本次回 {shown} 条（可翻页）")
         elif name == "project_snapshot" and isinstance(data, dict):
             s = data
             detail = (f"项目「{s.get('project',{}).get('name','')}」："
@@ -1177,7 +1233,8 @@ class _ToolExecutor:
                      f"【未完成任务】\n{task_lines}"},
                 ], temperature=0.2, max_tokens=1500)
             except Exception as e:
-                return {"ok": False, "error": f"读名单失败：{e}"}
+                return {"ok": False,
+                        "error": "读名单失败：" + _brief_error(e, "确认资料已上传、模型可用，再试一次")}
             if jerr is not None:
                 return {"ok": False, "error": f"方案生成失败（模型输出无法解析：{jerr}）"}
 
@@ -1268,7 +1325,8 @@ class _ToolExecutor:
         try:
             result = fn(**args)
         except Exception as e:
-            result = {"ok": False, "error": f"工具执行异常: {e}"}
+            result = {"ok": False,
+                      "error": _brief_error(e, "换个说法重试；要真实 id 可先 list_tasks / list_members")}
         ms = int((time.time() - t0) * 1000)
         self.last_trace.append(self.summarize_tool(name, args, result, ms))
         return result

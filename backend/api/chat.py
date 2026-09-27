@@ -22,7 +22,10 @@ from services import knowledge_service, project_service
 
 router = APIRouter()
 
-HISTORY_LIMIT = 20  # 作为上下文带入 Agent 的最近消息条数
+HISTORY_LIMIT = 20    # 会议纪要等场景取多少条历史
+HISTORY_VERBATIM = 8  # 进上下文时「原样保留」的最近条数
+HISTORY_FETCH = 60    # 最多回看多少条（超出的早期部分压成一段摘要）
+HISTORY_MODEL_MIN = 16  # 要折叠的早期消息超过这个数才值得花一次模型调用；否则用免费摘要
 
 # 快照注入用的中文标签（状态/优先级对模型和用户都更直观）
 _STATUS_CN = {"todo": "待办", "doing": "进行中", "done": "已完成"}
@@ -134,7 +137,8 @@ def _maybe_inject_memory(db: Session, message: str, project_id: int | None) -> s
 
 
 def _load_history(db: Session, user_id: int, project_id: int | None,
-                  exclude_last_user_content: str | None = None) -> list[dict]:
+                  exclude_last_user_content: str | None = None,
+                  limit: int = HISTORY_LIMIT) -> list[dict]:
     """取最近上下文：绑定项目时只取该项目下的消息，未绑定时取该用户全部消息。
 
     这是防止「跨项目串扰」的关键：不同项目的对话互不进入彼此的上下文。
@@ -143,7 +147,7 @@ def _load_history(db: Session, user_id: int, project_id: int | None,
     q = db.query(ChatMessage).filter_by(user_id=user_id)
     if project_id is not None:
         q = q.filter_by(project_id=project_id)
-    rows = q.order_by(ChatMessage.id.desc()).limit(HISTORY_LIMIT).all()
+    rows = q.order_by(ChatMessage.id.desc()).limit(limit).all()
     rows.reverse()  # 时间正序
     msgs = [{"role": m.role, "content": m.content} for m in rows
             if m.role in ("user", "assistant")]
@@ -152,6 +156,58 @@ def _load_history(db: Session, user_id: int, project_id: int | None,
             and msgs[-1]["content"] == exclude_last_user_content):
         msgs = msgs[:-1]  # 该条由 Agent.run 追加，去掉避免上下文重复
     return msgs
+
+
+def _fallback_digest(older: list[dict]) -> str:
+    """确定性兜底摘要（不调模型）：把用户说过的话各截一小段。"""
+    said = [m["content"].replace("\n", " ").strip()[:24]
+            for m in older if m["role"] == "user"]
+    return "；".join(said[-6:]) if said else "（更早的对话都是简短问答）"
+
+
+def _compact_history(older: list[dict]) -> str | None:
+    """把更早的历史压成一小段摘要（≤300 字）；失败退回确定性摘要。
+
+    压缩本身绝不能把对话搞挂 —— 所以这里是 try/except 包住的，异常一律降级。
+    """
+    if len(older) <= 4:
+        return None
+    head = f"【更早的对话摘要（{len(older)} 条已折叠）】"
+    if len(older) < HISTORY_MODEL_MIN:
+        # 不太长就别花一次模型调用：确定性摘要已经够用（省 token 也省一次往返）
+        return head + _fallback_digest(older)
+    try:
+        resp = llm.chat([
+            {"role": "system", "content":
+             "你是会话压缩器。把下面的历史对话压成不超过 3 条要点（每条不超过 30 字），"
+             "只保留三样东西：用户的核心诉求、已经定下的决定、还没解决的悬而未决项。"
+             "不要复述寒暄，不要编造。直接输出要点，不要 JSON。"},
+            {"role": "user", "content": "\n".join(
+                f"{'用户' if m['role'] == 'user' else '助手'}：{m['content'][:200]}"
+                for m in older)},
+        ], temperature=0.2, max_tokens=220)
+        text = (resp.choices[0].message.content or "").strip()
+        if text:
+            return head + (text if len(text) <= 300 else text[:300] + "…")
+    except Exception:
+        pass  # 压缩失败不打扰对话，走确定性兜底
+    return head + _fallback_digest(older)
+
+
+def _load_context(db: Session, user_id: int, project_id: int | None,
+                  exclude_last_user_content: str | None = None):
+    """返回 (原样历史, 更早历史的摘要)。
+
+    为什么不全量带：上下文是有限资源（Anthropic《Effective context engineering》）；
+    为什么不全丢：硬截最近 20 条会把"开头定下的事"丢掉，聊到后面就开始答非所问。
+    折中：最近 8 条原样保留，更早的（最多回看 60 条）压成一段摘要。
+    """
+    rows = _load_history(db, user_id, project_id, exclude_last_user_content,
+                         limit=HISTORY_FETCH)
+    if len(rows) <= HISTORY_VERBATIM:
+        return rows, None
+    older, latest = rows[:-HISTORY_VERBATIM], rows[-HISTORY_VERBATIM:]
+    return latest, _compact_history(older)
 
 
 @router.post("/send")
@@ -238,21 +294,28 @@ def chat_send(body: ChatRequest, db: Session = Depends(get_db)):
                 _note = _format_snapshot_note(snap)
             else:
                 _note = None
-            history = _load_history(db, body.user_id, body.project_id,
-                                    exclude_last_user_content=body.message)
+            history, compact_note = _load_context(db, body.user_id, body.project_id,
+                                                 exclude_last_user_content=body.message)
+            _note = "\n\n".join(x for x in (_note, compact_note) if x) or None
             reply = agent.run(body.message, history=history, context_note=_note)
             # project_snapshot 非 LLM 工具，不会进 executor.last_trace，这里手动合并
             trace = trace + agent.executor.last_trace
 
     # 3) 其余请求照旧走 Agent 工具循环（dispatch 内部已记录执行轨迹）
-    history = _load_history(db, body.user_id, body.project_id,
-                            exclude_last_user_content=body.message)
     if reply is None:
         # 长期记忆注入：绑定项目 + 资料/记忆类问题 → 代码层自动 RAG 检索
         # （失败静默降级，不影响对话；命中则作为 system 上下文交给模型）
         memory_note = _maybe_inject_memory(db, body.message, body.project_id)
-        reply = agent.run(body.message, history=history, context_note=memory_note)
+        history, compact_note = _load_context(db, body.user_id, body.project_id,
+                                             exclude_last_user_content=body.message)
+        context_note = "\n\n".join(x for x in (compact_note, memory_note) if x) or None
+        reply = agent.run(body.message, history=history, context_note=context_note)
         trace = agent.executor.last_trace
+        # 折叠更早的对话也记一笔，让"为什么它还记着开头的事"对用户可见
+        if compact_note:
+            trace = [{"tool": "compact_history", "label": "折叠更早的对话",
+                      "detail": compact_note.split("】")[0].lstrip("【"),
+                      "ok": True, "ms": 0}] + trace
         # 检索动作本身记入轨迹，让「Agent 查了项目记忆」对用户可见
         if memory_note:
             trace = [{"tool": "search_knowledge", "label": "检索项目记忆",

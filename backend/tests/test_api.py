@@ -500,12 +500,19 @@ def test_chat_task_add_with_details_still_creates(client, monkeypatch):
 # ---------- 删除/编辑能力（delete_task / update_task_fields / delete_project） ----------
 
 def _mock_tool_chat(monkeypatch, first_tool, first_args, final_text="完成"):
-    """打桩 LLM：第一次返回指定工具调用，第二次返回收尾文本。"""
+    """打桩 LLM：第一次（带 tools 的那次，即 Agent 工具循环）返回指定工具调用，之后返回收尾文本。
+
+    注意只对「带 tools 的调用」返回工具调用 —— 会话压缩这类内部调用没有 tools，
+    不能被当成工具循环的第一步（否则会把它误当成"第一次调用"）。
+    """
     from types import SimpleNamespace
 
     calls = {"n": 0}
 
     def fake_chat(messages, tools=None, **kwargs):
+        if not tools:
+            return SimpleNamespace(choices=[
+                SimpleNamespace(message=SimpleNamespace(content=final_text, tool_calls=None))])
         calls["n"] += 1
         if calls["n"] == 1:
             tc = SimpleNamespace(

@@ -37,3 +37,12 @@ backend/test_project_manager.db
 # Docker 数据卷（本地持久化，不入库）
 docker_data/
 
+# 参考资料 / 审计日志 / 截图：仓库只放代码 + 开发文档（见 docs/WORKFLOW.md §4）
+# 这些一律留工作区，不进仓库、不推远端
+docs/资料/
+docs/Agent_Audit_Logs/
+docs/screenshots/*
+# 例外：README 正文里在用的三张图（README 属于开发文档，图随文走）
+!docs/screenshots/dashboard.png
+!docs/screenshots/chat-agent-trace.png
+!docs/screenshots/chat-agent-trace2.png
