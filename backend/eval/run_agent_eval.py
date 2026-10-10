@@ -257,13 +257,18 @@ class Fixture:
 
     @staticmethod
     def _clear_assignments() -> None:
-        """清掉上一轮留下的分配方案（pending 会影响「确认」这类用例的路由判定）。"""
-        from models.database import AssignmentRun, NoteDraft, SessionLocal
+        """清掉上一轮留下的方案与台账。
+
+        pending 方案会影响「确认」这类用例的路由判定；已落库的撤销台账会影响
+        「撤销」用例（u04 就是「没有可撤销的动作时别乱动」）—— 所以两类都要清。
+        """
+        from models.database import ActionRun, AssignmentRun, NoteDraft, SessionLocal
 
         db = SessionLocal()
         try:
             db.query(AssignmentRun).delete()
             db.query(NoteDraft).delete()      # 笔记草稿同理：留着会改变「存/不用」的路由
+            db.query(ActionRun).delete()      # 批量方案 + 撤销台账（D-028）
             db.commit()
         finally:
             db.close()
@@ -413,6 +418,61 @@ def _seed_note(project_id: int | None, save: bool = False) -> None:
         ex.save_note()
 
 
+# ---------- 阶段 3（D-028）的用例前置：批量方案与撤销台账 ----------
+BULK_STATUS_TITLES = ["首页设计", "素材拍摄"]   # 批量改状态用例要动的两条
+BULK_DELETE_TITLES = ["素材拍摄", "弱网容错"]   # 批量删除用例要动的两条
+UNDO_ASSIGN_TITLE = "首页设计"                 # 指派-撤销用这条
+UNDO_DELETE_TITLE = "弱网容错"                 # 删除-撤销用这条
+
+
+def _task_id_of(client, project_id: int, title: str) -> int:
+    rows = client.get("/api/tasks", params={"project_id": project_id}).json()
+    hit = next((t["id"] for t in rows if t["title"] == title), None)
+    if hit is None:
+        raise RuntimeError(f"评测夹具里找不到任务「{title}」")
+    return hit
+
+
+def _seed_action_run(project_id: int, kind: str, items: list, status: str,
+                     undo: list | None = None) -> None:
+    """离线准备的方案/台账：offline 模式不调模型，也不做真实写库，够验路由就行。"""
+    from models.database import ActionRun, SessionLocal
+
+    db = SessionLocal()
+    try:
+        db.add(ActionRun(project_id=project_id, user_id=USER_ID, kind=kind,
+                         items=json.dumps(items, ensure_ascii=False),
+                         undo=json.dumps(undo or [], ensure_ascii=False),
+                         status=status, applied_count=len(items)))
+        db.commit()
+    finally:
+        db.close()
+
+
+def _plan_bulk_status(client, fixture: Fixture, project_id: int) -> None:
+    from core.agent import _ToolExecutor
+
+    ids = [_task_id_of(client, project_id, t) for t in BULK_STATUS_TITLES]
+    _ToolExecutor(user_id=USER_ID, project_id=project_id).plan_bulk_status(
+        task_ids=ids, status="done")
+
+
+def _plan_bulk_delete(client, fixture: Fixture, project_id: int) -> None:
+    from core.agent import _ToolExecutor
+
+    ids = [_task_id_of(client, project_id, t) for t in BULK_DELETE_TITLES]
+    _ToolExecutor(user_id=USER_ID, project_id=project_id).plan_bulk_delete(task_ids=ids)
+
+
+def _seed_offline_action(project_id: int, kind: str, status: str) -> None:
+    """离线台账：只为了让「撤销」路由判定成立（has_undoable_action）。"""
+    items = [{"task_id": 1, "title": "离线台账占位"}]
+    undo = ([{"type": "task_restore", "task": {"id": 1, "title": "离线台账占位"}}]
+            if kind == "task_delete" else [{"type": "task_fields", "task_id": 1,
+                                            "before": {"status": "todo"}}])
+    _seed_action_run(project_id, kind, items, status, undo)
+
+
 def run_case(client, fixture: Fixture, case: dict, mode: str) -> dict:
     fixture.reset()
     bound = case.get("bound", True)
@@ -432,6 +492,43 @@ def run_case(client, fixture: Fixture, case: dict, mode: str) -> dict:
     elif case.get("setup") == "note_saved":
         # 离线模式不调 embedding：只塞草稿，够验路由
         _seed_note(project_id, save=(mode == "live"))
+    elif case.get("setup") in ("plan_bulk_status", "plan_bulk_delete"):
+        if mode == "live":
+            (_plan_bulk_status if case["setup"] == "plan_bulk_status"
+             else _plan_bulk_delete)(client, fixture, project_id)
+        else:
+            kind = "bulk_status" if case["setup"] == "plan_bulk_status" else "bulk_delete"
+            _seed_action_run(project_id, kind,
+                             [{"task_id": 1, "title": "离线方案占位",
+                               "from": "todo", "to": "done"}], "pending")
+    elif case.get("setup") == "applied_bulk_status":
+        if mode == "live":
+            from core.agent import _ToolExecutor
+
+            ex = _ToolExecutor(user_id=USER_ID, project_id=project_id)
+            ids = [_task_id_of(client, project_id, t) for t in BULK_STATUS_TITLES]
+            ex.plan_bulk_status(task_ids=ids, status="done")
+            ex.apply_bulk_action()
+        else:
+            _seed_offline_action(project_id, "bulk_status", "applied")
+    elif case.get("setup") == "applied_assignment":
+        if mode == "live":
+            from core.agent import _ToolExecutor
+
+            tid = _task_id_of(client, project_id, UNDO_ASSIGN_TITLE)
+            mid = next(m["id"] for m in client.get("/api/members").json()
+                       if m["name"] == FIXTURE_MEMBERS[0])
+            _ToolExecutor(user_id=USER_ID, project_id=project_id).assign_task(tid, mid)
+        else:
+            _seed_offline_action(project_id, "assign", "applied")
+    elif case.get("setup") == "deleted_task":
+        if mode == "live":
+            from core.agent import _ToolExecutor
+
+            tid = _task_id_of(client, project_id, UNDO_DELETE_TITLE)
+            _ToolExecutor(user_id=USER_ID, project_id=project_id).delete_task(tid)
+        else:
+            _seed_offline_action(project_id, "task_delete", "applied")
     before = fixture.snapshot()
 
     run = {

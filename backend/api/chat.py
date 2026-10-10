@@ -13,6 +13,10 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from api.chat_format import (format_apply_reply, format_bulk_applied,
+                             format_note_draft, format_note_saved,
+                             format_plan_reply, format_rag_note,
+                             format_snapshot_note, format_undo)
 from core import llm
 from core.agent import Agent, resolve_bound_action, is_ask_detail_intent
 from core.rag import search as rag_search
@@ -27,113 +31,11 @@ HISTORY_VERBATIM = 8  # 进上下文时「原样保留」的最近条数
 HISTORY_FETCH = 60    # 最多回看多少条（超出的早期部分压成一段摘要）
 HISTORY_MODEL_MIN = 16  # 要折叠的早期消息超过这个数才值得花一次模型调用；否则用免费摘要
 
-# 快照注入用的中文标签（状态/优先级对模型和用户都更直观）
-_STATUS_CN = {"todo": "待办", "doing": "进行中", "done": "已完成"}
-_PRIORITY_CN = {"high": "高", "medium": "中", "low": "低"}
-
 # 资料/记忆类意图：绑定项目时由代码层自动 RAG 检索注入（项目长期记忆），
 # 无需模型自觉调用 search_knowledge —— 否则模型经常「不查就答」。
 _MATERIAL_HINT = re.compile(
     r"需求|方案|设计|文档|纪要|会议|规则|验收|标准|规范|做法|背景|目标|"
     r"怎么|如何|为什么|哪些资料|记不记得|之前说过|上回|上次|参考|根据|文档里")
-
-
-def _format_plan_reply(res: dict, project_name: str | None) -> str:
-    """把 plan_tasks 的返回结果拼成给用户的文字回复（不依赖模型二次生成）。"""
-    if not res.get("ok"):
-        return f"任务规划失败：{res.get('error', '未知错误')}。可重试，或直接说明任务明细，我逐个创建。"
-    tasks = res.get("data") or []
-    name = project_name or "该项目"
-    lines = "\n".join(f"{i}. {t['title']}" for i, t in enumerate(tasks, 1))
-    note = res.get("note", "")
-    if res.get("reused"):  # 幂等命中：复用上一批，不重复创建
-        return (f"「{name}」刚刚已经规划过一批任务（共 {len(tasks)} 个），本次没有重复创建：\n"
-                f"{lines}\n{note}")
-    return f"已为「{name}」自动规划 {len(tasks)} 个任务：\n{lines}\n{note}"
-
-
-def _format_apply_reply(res: dict, project_name: str | None) -> str:
-    """把「方案落库」的结果拼成给用户的文字回复（不依赖模型二次生成）。"""
-    if not res.get("ok"):
-        return f"落库失败：{res.get('error', '未知错误')}"
-    rows = res.get("data") or []
-    name = project_name or "该项目"
-    lines = "\n".join(
-        f"{i}. {t['title']} → {t['assignee_name']}"
-        f"（状态仍为{_STATUS_CN.get(t['status'], t['status'])}）"
-        for i, t in enumerate(rows, 1))
-    out = f"已把「{name}」的 {len(rows)} 条指派落库：\n{lines}"
-    created = res.get("created_members") or []
-    if created:
-        who = "、".join(f"{c['name']}（邀请码 {c['invite_code']}）" for c in created)
-        out += f"\n顺手建了 {len(created)} 个占位成员：{who} —— 把邀请码发给对方，注册后即可认领。"
-    skipped = res.get("skipped") or []
-    if skipped:
-        out += f"\n{len(skipped)} 条没动：{'；'.join(skipped)}"
-    out += "\n只改了负责人，任务状态没有变化。"
-    return out
-
-
-def _format_note_draft(res: dict) -> str:
-    """拟好草稿 → 问一句要不要记（阶段 2 记忆闭环：写前给一句话确认，避免刷噪音）。"""
-    if not res.get("ok"):
-        return f"没能拟出笔记：{res.get('error', '未知错误')}"
-    d = res.get("data") or {}
-    return (f"这句话听着像个决定，我拟成一条笔记：\n\n"
-            f"《{d.get('title', '')}》\n{d.get('content', '')}\n\n"
-            f"要记进项目记忆就说「存」，不用就说「不用」。")
-
-
-def _format_note_saved(res: dict, project_name: str | None) -> str:
-    if not res.get("ok"):
-        return f"没能记下来：{res.get('error', '未知错误')}"
-    if res.get("skipped"):
-        return res.get("note") or "这条刚才已经记过了，没有重复入库。"
-    d = res.get("data") or {}
-    return (f"已记进「{project_name or '这个项目'}」的项目记忆：《{d.get('title', '')}》"
-            f"——之后问「上次定的…」，我会检索到它。")
-
-
-def _format_snapshot_note(snap: dict) -> str:
-    """把项目状态快照压成给模型的 system 上下文（真实数据，禁止编造）。"""
-    d = snap.get("data", {})
-    p = d.get("project", {})
-    by = d.get("by_status", {})
-    lines = [
-        f"【项目「{p.get('name','')}」当前真实状态（已从数据库读取，回答务必基于以下数据，不得编造）】",
-        f"- 任务总数 {d.get('task_count',0)}：待办 {by.get('todo',0)} / "
-        f"进行中 {by.get('doing',0)} / 已完成 {by.get('done',0)}",
-    ]
-    tasks = d.get("tasks") or []
-    if tasks:
-        lines.append("- 任务明细（#id｜标题｜状态｜优先级；"
-                     "待办=todo、进行中=doing、已完成=done；高=high、中=medium、低=low）：")
-        for t in tasks:
-            lines.append(f"  · #{t['id']}｜{t['title']}｜{_STATUS_CN.get(t['status'], t['status'])}"
-                         f"｜{_PRIORITY_CN.get(t['priority'], t['priority'])}")
-        if d.get("tasks_truncated"):
-            lines.append(f"  · …另有 {d['tasks_truncated']} 个任务未列出，可用 list_tasks 查全量")
-    high = d.get("high_open") or []
-    if high:
-        lines.append(f"- 未完成的高优先级任务：{'、'.join(high)}")
-    blocked = d.get("blocked") or []
-    if blocked:
-        lines.append("- 依赖未就绪（可能阻塞）的任务：")
-        for b in blocked[:5]:
-            lines.append(f"  · 「{b['task']}」需等「{b['waiting_on']}」（当前 {b['pre_status']}）")
-    if not (high or blocked) and d.get("task_count", 0) == 0:
-        lines.append("- 项目暂无任务，可建议用户先「帮我规划任务」。")
-    return "\n".join(lines)
-
-
-def _format_rag_note(hits: list[dict]) -> str:
-    """把 RAG 命中的记忆片段压成给模型的 system 上下文（标注来源，防止模型当自己的知识）。"""
-    lines = ["【项目记忆检索结果（来自知识库/会议纪要，回答务必基于以下原文，不得编造）】"]
-    for i, h in enumerate(hits[:3], 1):
-        src = h.get("doc_type") or ""
-        src_label = "会议纪要" if src == "meeting" else "知识库"
-        lines.append(f"{i}. 《{h.get('title','')}》〔{src_label}〕：{h.get('text','')[:300]}")
-    return "\n".join(lines)
 
 
 def _maybe_inject_memory(db: Session, message: str, project_id: int | None) -> str | None:
@@ -153,7 +55,7 @@ def _maybe_inject_memory(db: Session, message: str, project_id: int | None) -> s
         return None  # embedding 未就绪/向量库异常 → 静默降级，不让检索拖垮对话
     if not hits:
         return None
-    return _format_rag_note(hits)
+    return format_rag_note(hits)
 
 
 def _load_history(db: Session, user_id: int, project_id: int | None,
@@ -288,7 +190,7 @@ def chat_send(body: ChatRequest, db: Session = Depends(get_db)):
             res = agent.executor.plan_tasks()  # project_id 省略 → 落到绑定项目
             _ms = int((time.time() - _t0) * 1000)
             trace = [agent.executor.summarize_tool("plan_tasks", {}, res, _ms)]
-            reply = _format_plan_reply(res, agent.executor.project_name)
+            reply = format_plan_reply(res, agent.executor.project_name)
         elif action == "assign_plan":
             # 按上传的名单/人员说明拟分配方案（不写库，D-017）
             _t0 = time.time()
@@ -297,12 +199,32 @@ def chat_send(body: ChatRequest, db: Session = Depends(get_db)):
             trace = [agent.executor.summarize_tool("plan_assignment_from_doc", {}, res, _ms)]
             reply = res.get("markdown") or f"没能拟出分配方案：{res.get('error', '未知错误')}"
         elif action == "apply":
-            # 用户确认后才落库（只在存在待确认方案时才会走到这里）
+            # 用户确认后才落库（只在真的有待确认方案时才会走到这里）：
+            # 可能是按名单分配的方案，也可能是批量改状态/删除的方案（D-028）
             _t0 = time.time()
-            res = agent.executor.apply_assignment()
+            res = agent.executor.apply_pending_action()
             _ms = int((time.time() - _t0) * 1000)
-            trace = [agent.executor.summarize_tool("apply_assignment", {}, res, _ms)]
-            reply = _format_apply_reply(res, agent.executor.project_name)
+            tool = "apply_bulk_action" if res.get("kind") in ("bulk_status", "bulk_delete") \
+                else "apply_assignment"
+            trace = [agent.executor.summarize_tool(tool, {}, res, _ms)]
+            reply = (format_bulk_applied(res, agent.executor.project_name) if tool == "apply_bulk_action"
+                     else format_apply_reply(res, agent.executor.project_name))
+        elif action == "apply_missing":
+            # 说了「就按这个来」，但没有待确认方案（模型可能自己手写了一份没落成方案）：
+            # 如实说明并请用户重出一遍，**绝不**退化成逐个直接写任务（D-028 探针实测的缺口）
+            reply = ("我这边没有找到待确认的方案 —— 刚才那份多半是直接说给你听的，没有真正存成方案。\n"
+                     "请把要动的任务再说一遍（例如「把 #53 #54 标记为已完成」或「删掉 A 和 B」），"
+                     "我会先拟一份方案给你过目，你说「就按这个来」我再落库。")
+            trace = [{"tool": "guard", "label": "没有待确认的方案",
+                      "detail": "话术是确认落库，但项目里没有 pending 方案（未写入任何数据）",
+                      "ok": True, "ms": 0}]
+        elif action == "undo":
+            # 一句话撤销：按台账回滚最近一次落库动作（指派/改状态/删除/批量）
+            _t0 = time.time()
+            res = agent.executor.undo_last_action()
+            _ms = int((time.time() - _t0) * 1000)
+            trace = [agent.executor.summarize_tool("undo_last_action", {}, res, _ms)]
+            reply = format_undo(res)
         elif action == "note_draft":
             # 记忆闭环：认出"这是个决定" → 先拟稿，不写库（D-027）
             _t0 = time.time()
@@ -310,13 +232,13 @@ def chat_send(body: ChatRequest, db: Session = Depends(get_db)):
             _ms = int((time.time() - _t0) * 1000)
             trace = [agent.executor.summarize_tool("draft_note", {"text": body.message},
                                                    res, _ms)]
-            reply = _format_note_draft(res)
+            reply = format_note_draft(res)
         elif action == "note_confirm":
             _t0 = time.time()
             res = agent.executor.save_note()
             _ms = int((time.time() - _t0) * 1000)
             trace = [agent.executor.summarize_tool("save_note", {}, res, _ms)]
-            reply = _format_note_saved(res, agent.executor.project_name)
+            reply = format_note_saved(res, agent.executor.project_name)
         elif action == "note_discard":
             _t0 = time.time()
             res = agent.executor.discard_note()
@@ -333,7 +255,7 @@ def chat_send(body: ChatRequest, db: Session = Depends(get_db)):
             _ms = int((time.time() - _t0) * 1000)
             if snap.get("ok"):
                 trace = [ro.executor.summarize_tool("project_snapshot", {}, snap, _ms)]
-                _note = _format_snapshot_note(snap)
+                _note = format_snapshot_note(snap)
             else:
                 _note = None
             history, compact_note = _load_context(db, body.user_id, body.project_id,

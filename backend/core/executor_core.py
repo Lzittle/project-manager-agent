@@ -8,7 +8,8 @@ from core.rag import search as rag_search
 from core.utils import PRI_CN, brief_error, clip
 from models.database import (SessionLocal, Project, Task, PlanRun, AssignmentRun,
                              KnowledgeDocument, Member, NoteDraft)
-from services import knowledge_service, member_service, project_service, task_service
+from services import (action_service, knowledge_service, member_service,
+                      project_service, task_service)
 
 
 class _CoreToolMixin:
@@ -171,21 +172,33 @@ class _CoreToolMixin:
     def update_task_status(self, task_id: int, status: str) -> dict:
         db = SessionLocal()
         try:
+            before = db.get(Task, task_id)
+            old_status = before.status if before is not None else None
             t = task_service.update_task(db, task_id, status=status)
             if t is None:
                 return {"ok": False, "error": f"任务 {task_id} 不存在"}
+            # 留撤销台账（D-028）：状态改错了，一句「撤销」按原值放回
+            self._record_action("task_update",
+                                [{"task_id": t.id, "title": t.title, "to": status}],
+                                [action_service.field_undo(t.id, status=old_status)],
+                                project_id=t.project_id)
             return {"ok": True, "data": {"id": t.id, "title": t.title, "status": t.status,
                                          "project_id": t.project_id}}
         finally:
             db.close()
 
     def delete_task(self, task_id: int) -> dict:
-        """删除任务（级联删除评论）。"""
+        """删除任务（级联删除评论）。删之前留全量快照，删错了能一句话撤销回来。"""
         db = SessionLocal()
         try:
+            payload = action_service.task_restore_payload(db, task_id)
             snap = task_service.delete_task(db, task_id)
             if snap is None:
                 return {"ok": False, "error": f"任务 {task_id} 不存在"}
+            self._record_action("task_delete",
+                                [{"task_id": snap["id"], "title": snap["title"]}],
+                                [action_service.restore_undo(payload)],
+                                project_id=snap["project_id"])
             return {"ok": True, "data": {"id": snap["id"], "title": snap["title"],
                                          "project_id": snap["project_id"]}}
         finally:
@@ -227,9 +240,14 @@ class _CoreToolMixin:
             return {"ok": False, "error": "未提供任何要更新的字段（title/description/status/priority）"}
         db = SessionLocal()
         try:
+            before = db.get(Task, task_id)
+            old = {k: getattr(before, k) for k in fields} if before is not None else {}
             t = task_service.update_task(db, task_id, **fields)
             if t is None:
                 return {"ok": False, "error": f"任务 {task_id} 不存在"}
+            self._record_action("task_update", [{"task_id": t.id, "title": t.title}],
+                                [action_service.field_undo(t.id, **old)],
+                                project_id=t.project_id)
             return {"ok": True, "data": {"id": t.id, "title": t.title, "status": t.status,
                                          "priority": t.priority, "project_id": t.project_id}}
         finally:

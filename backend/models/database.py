@@ -1,7 +1,8 @@
 """SQLAlchemy 数据库模型：业务表 + 引擎/Session 管理。
 
 表清单：users / members / projects / tasks / task_dependencies / task_comments /
-       chat_messages / knowledge_documents / plan_runs
+       chat_messages / knowledge_documents / plan_runs / assignment_runs /
+       note_drafts / action_runs
 关联：用户 1-N 项目；项目 1-N 任务；任务 1-N 评论；任务 N-N 任务（依赖，经
       task_dependencies 桥接）；成员 1-N 任务(assignee)；项目 1-N 知识库文档；
       用户 1-N 聊天消息；项目 1-N 规划批次(plan_runs)
@@ -300,4 +301,35 @@ class NoteDraft(Base):
     title = Column(String(200), nullable=False)
     content = Column(Text, nullable=False)
     status = Column(String(20), default="pending", index=True)  # pending / saved / discarded
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+
+class ActionRun(Base):
+    """批量动作方案 + 落库台账（阶段 3，D-028）。
+
+    一张表两种用途，靠 status 区分生命周期：
+
+    1. **待确认的批量方案**（kind=bulk_status / bulk_delete，status=pending）：
+       批量改状态、批量删除影响面大，不许模型直接写库 —— 先在这里拟一份方案，
+       tasks 一个字都不动；用户确认后由 apply_bulk_action 落库。
+       同一项目同时只留一条 pending（新方案作废旧方案）。
+    2. **落库台账（撤销用）**：任何一次写库动作（指派 / 批量改状态 / 批量删除 /
+       单任务编辑）落库后都留一条 status=applied 的记录，`undo` 里存「动作之前的
+       原样」；用户一句「撤销」就按它回滚，回滚后置为 undone。
+
+    为什么单开一张表而不是复用 assignment_runs：那张表是「按名单分配」的专用方案
+    （带 doc_id、认人结果），语义和一般的批量动作不一样；台账这张只关心
+    「改了什么、怎么改回去」。时间戳同样取 Python 侧 datetime.now()，与
+    PlanRun / AssignmentRun 保持同一时钟口径。
+    """
+    __tablename__ = "action_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    kind = Column(String(30), nullable=False, index=True)  # bulk_status / bulk_delete / assign / assign_batch / task_update / task_delete
+    items = Column(Text, default="[]")   # 方案/落库条目：[{"task_id","title","from","to"}]
+    undo = Column(Text, default="[]")    # 撤销快照：[{"type":"task_fields"|"task_restore", ...}]
+    status = Column(String(20), default="pending", index=True)  # pending / applied / undone
+    applied_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.now, index=True)

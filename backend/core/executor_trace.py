@@ -19,9 +19,13 @@ class _TraceToolMixin:
         "discard_note": "丢弃笔记草稿",
         "assign_task": "指派任务", "plan_assignment_from_doc": "按名单拟分配方案",
         "apply_assignment": "落库分配方案",
+        "plan_bulk_status": "拟批量改状态方案", "plan_bulk_delete": "拟批量删除清单",
+        "apply_bulk_action": "落库批量方案", "undo_last_action": "撤销上一次操作",
     }
     _TASK_TOOLS = {"create_task", "update_task_status", "delete_task", "update_task_fields",
                    "assign_task"}
+    # 批量类工具返回的是条目列表（不是单条 data），引用要逐条抽
+    _BULK_TOOLS = {"plan_bulk_status", "plan_bulk_delete", "apply_bulk_action"}
     _PROJECT_TOOLS = {"create_project", "delete_project", "update_project_fields"}
 
     def _refs_from(self, name: str, args: dict, result: dict) -> list[dict]:
@@ -44,6 +48,19 @@ class _TraceToolMixin:
             for it in data:
                 refs.append({"kind": "task", "id": it.get("id") or it.get("task_id"),
                              "title": it.get("title", ""), "project_id": pid})
+        elif name in self._BULK_TOOLS and isinstance(data, list):
+            pid = args.get("project_id") or self.project_id
+            for it in data:
+                refs.append({"kind": "task", "id": it.get("id") or it.get("task_id"),
+                             "title": it.get("title", ""), "project_id": pid})
+        elif name == "undo_last_action" and isinstance(data, dict):
+            pid = self.project_id
+            for t in data.get("restored_tasks") or []:
+                refs.append({"kind": "task", "id": t.get("id"),
+                             "title": t.get("title", ""), "project_id": pid})
+            for f in data.get("restored_fields") or []:
+                refs.append({"kind": "task", "id": f.get("id"),
+                             "title": f.get("title", ""), "project_id": pid})
         return refs
 
     def summarize_tool(self, name: str, args: dict, result: dict, ms: int = 0) -> dict:
@@ -114,6 +131,19 @@ class _TraceToolMixin:
                       else f"《{data.get('title', '')}》已记进项目记忆")
         elif name == "discard_note" and isinstance(data, dict):
             detail = "草稿已作废，没有写进项目记忆"
+        elif name == "plan_bulk_status" and isinstance(data, list):
+            if not data:
+                detail = result.get("note") or "这些任务本来就都是目标状态，没有要改的"
+            else:
+                detail = f"拟出 {len(data)} 条改状态方案（待确认，未落库）"
+        elif name == "plan_bulk_delete" and isinstance(data, list):
+            detail = f"列出 {len(data)} 个待删任务（待确认，一个字都没删）"
+        elif name == "apply_bulk_action" and isinstance(data, list):
+            what = "删除" if result.get("kind") == "bulk_delete" else "改状态"
+            detail = f"落库 {len(data)} 条{what}（可撤销）"
+        elif name == "undo_last_action" and isinstance(data, dict):
+            n = len(data.get("restored_tasks") or []) + len(data.get("restored_fields") or [])
+            detail = result.get("note") or f"已回滚 {n} 条改动"
         else:
             detail = f"{label}完成"
         step = {"tool": name, "label": label, "detail": clip(detail, 120),

@@ -3,11 +3,11 @@
   "description": "Agent 行为评测集：真实话术 → 期望的路由 / 工具 / 写库 / 回复。message 尽量照抄真实用户说法（含口语、省略主语、歧义说法）。",
   "fields": {
     "bound": "true=对话绑定夹具里的『评测主项目』；false=不绑定（project_id=null）",
-    "expect.route": "期望走代码层哪条路由：conflict / ask / plan / query / agent",
+    "expect.route": "期望走代码层哪条路由：conflict / ask / plan / query / apply / apply_missing / undo / agent",
     "expect.must_call_any": "每组至少命中一个工具（AND of OR）",
     "expect.must_not_call": "禁止调用的工具",
     "expect.write.mode": "none / create / update / delete / doc / assign(改负责人) / member(加成员) / assign_or_member",
-    "setup": "可选：跑该用例前先做的准备｜plan_assignment（先生成一份待确认方案；offline 用直连 DB 的假方案，零 token）｜prior_conversation（先塞一段前置对话，让「刚才的结论」有指代）｜note_draft（先拟一条结论笔记草稿）｜note_saved（再把它存进项目记忆，仅 live 会向量化）",
+    "setup": "可选：跑该用例前先做的准备｜plan_assignment（先生成一份待确认分配方案；offline 用直连 DB 的假方案，零 token）｜plan_bulk_status / plan_bulk_delete（先生成一份待确认的批量方案）｜applied_bulk_status / applied_assignment（先落库一次，用于测「撤销」）｜deleted_task（先删掉一个任务并留下撤销台账）｜prior_conversation（先塞一段前置对话，让「刚才的结论」有指代）｜note_draft（先拟一条结论笔记草稿）｜note_saved（再把它存进项目记忆，仅 live 会向量化）",
     "expect.reply_contains_any": "回复里至少出现其中一个关键词",
     "known_gap": "true=已知的现有短板（基线先记录，用来观察改没改好）",
     "repeat": "整条用例重复发送的次数，用于测幂等"
@@ -774,13 +774,13 @@
       "message": "删掉「素材拍摄」和「首页设计」这两个任务",
       "expect": {
         "route": ["agent"],
-        "must_call_any": [["delete_task"]],
-        "must_not_call": ["create_task", "plan_tasks"],
-        "write": {"mode": "delete", "min": 2, "max": 2},
-        "reply_contains_any": []
+        "must_call_any": [["plan_bulk_delete"]],
+        "must_not_call": ["delete_task", "create_task", "plan_tasks"],
+        "write": {"mode": "none"},
+        "reply_contains_any": ["素材拍摄", "首页设计"]
       },
       "known_gap": false,
-      "note": "批量删除：必须删对两条"
+      "note": "批量删除（阶段 3 起）：先出方案、一个字都不删；确认后才落库。旧基线里这条是直接删两条，规矩改了"
     },
     {
       "id": "d02_project_edit_in_bound_mode",
@@ -794,8 +794,8 @@
         "write": {"mode": "none"},
         "reply_contains_any": []
       },
-      "known_gap": false,
-      "note": "绑定模式刻意不暴露项目级编辑工具（build_tools 的 HIDDEN）：这里要的是「别动任务、别瞎写」，而不是硬调一个不存在的工具"
+      "known_gap": true,
+      "note": "绑定模式刻意不暴露项目级编辑工具（build_tools 的 HIDDEN）：这里要的是「别动任务、别瞎写」，而不是硬调一个不存在的工具。2026-10-01 实测：模型会去试 update_task_fields（被拦下、零写入）；用改动前的提示词跑对照实验同样失败，属既有短板，非本轮回归"
     },
     {
       "id": "n01_send_me_the_list",
@@ -1039,6 +1039,146 @@
       },
       "known_gap": false,
       "note": "记忆闭环的闭环：先存进去，隔一会儿问，能被检索出来复述"
+    },
+    {
+      "id": "b01_bulk_status_plan_only",
+      "category": "批量写",
+      "bound": true,
+      "message": "把「首页设计」和「素材拍摄」这两个任务都标记成已完成",
+      "expect": {
+        "route": ["agent"],
+        "must_call_any": [["plan_bulk_status"]],
+        "must_not_call": ["update_task_status", "update_task_fields", "delete_task"],
+        "write": {"mode": "none"},
+        "reply_contains_any": ["确认", "落库"]
+      },
+      "known_gap": false,
+      "note": "批量改状态：先出方案给人过一眼，一个字都不写库（阶段 3）"
+    },
+    {
+      "id": "b02_bulk_status_confirm_applies",
+      "category": "批量写",
+      "bound": true,
+      "setup": "plan_bulk_status",
+      "message": "就按这个来",
+      "expect": {
+        "route": ["apply"],
+        "must_call_any": [["apply_bulk_action"]],
+        "must_not_call": ["plan_tasks", "create_task"],
+        "write": {"mode": "update", "min": 2, "max": 2},
+        "reply_contains_any": ["已完成", "撤销"]
+      },
+      "known_gap": false,
+      "note": "确认后落库，回复里要告诉用户「能撤销」——不然撤销能力没人知道"
+    },
+    {
+      "id": "b03_bulk_delete_all_todo_plan_only",
+      "category": "批量写",
+      "bound": true,
+      "message": "把待办的任务全都删掉",
+      "expect": {
+        "route": ["agent"],
+        "must_call_any": [["plan_bulk_delete"]],
+        "must_not_call": ["delete_task", "delete_project"],
+        "write": {"mode": "none"},
+        "reply_contains_any": ["确认", "条"]
+      },
+      "known_gap": false,
+      "note": "影响面最大的一类话术：不许直接删，先列清单让人拍板"
+    },
+    {
+      "id": "b04_bulk_delete_confirm_applies",
+      "category": "批量写",
+      "bound": true,
+      "setup": "plan_bulk_delete",
+      "message": "确认",
+      "expect": {
+        "route": ["apply"],
+        "must_call_any": [["apply_bulk_action"]],
+        "must_not_call": ["plan_tasks", "create_task"],
+        "write": {"mode": "delete", "min": 2, "max": 2},
+        "reply_contains_any": ["撤销"]
+      },
+      "known_gap": false,
+      "note": "删完必须留一句「能撤销」（撤销台账里有这次删除的原样）"
+    },
+    {
+      "id": "u01_undo_last_assignment",
+      "category": "撤销",
+      "bound": true,
+      "setup": "applied_assignment",
+      "message": "撤销上一次指派",
+      "expect": {
+        "route": ["undo"],
+        "must_call_any": [["undo_last_action"]],
+        "must_not_call": ["plan_tasks", "create_task", "delete_task"],
+        "write": {"mode": "assign", "min": 1},
+        "reply_contains_any": ["撤销", "负责人"]
+      },
+      "known_gap": false,
+      "note": "一句话撤销上一次指派：负责人回到原样"
+    },
+    {
+      "id": "u02_undo_last_bulk_status",
+      "category": "撤销",
+      "bound": true,
+      "setup": "applied_bulk_status",
+      "message": "撤销",
+      "expect": {
+        "route": ["undo"],
+        "must_call_any": [["undo_last_action"]],
+        "must_not_call": ["plan_bulk_status", "plan_tasks"],
+        "write": {"mode": "update", "min": 2},
+        "reply_contains_any": ["撤销", "状态"]
+      },
+      "known_gap": false,
+      "note": "撤销批量改状态：两条任务的状态一起回到原样"
+    },
+    {
+      "id": "u03_undo_last_delete",
+      "category": "撤销",
+      "bound": true,
+      "setup": "deleted_task",
+      "message": "刚才删错了，撤销",
+      "expect": {
+        "route": ["undo"],
+        "must_call_any": [["undo_last_action"]],
+        "must_not_call": ["create_task", "plan_tasks"],
+        "write": {"mode": "create", "min": 1},
+        "reply_contains_any": ["恢复", "找回", "撤销"]
+      },
+      "known_gap": false,
+      "note": "撤销删除：按快照把任务原样放回来（含原 id、负责人与依赖）"
+    },
+    {
+      "id": "u04_undo_without_history",
+      "category": "撤销",
+      "bound": true,
+      "message": "撤销",
+      "expect": {
+        "route": ["agent"],
+        "must_call_any": [],
+        "must_not_call": ["delete_task", "update_task_fields", "update_task_status"],
+        "write": {"mode": "none"},
+        "reply_contains_any": ["没有", "没有可撤销", "先"]
+      },
+      "known_gap": false,
+      "note": "没有可撤销的动作时不许乱动数据，如实说一句"
+    },
+    {
+      "id": "b05_confirm_without_pending_plan",
+      "category": "批量写",
+      "bound": true,
+      "message": "就按这个来",
+      "expect": {
+        "route": ["apply_missing"],
+        "must_call_any": [],
+        "must_not_call": ["update_task_status", "update_task_fields", "delete_task", "apply_bulk_action"],
+        "write": {"mode": "none"},
+        "reply_contains_any": ["方案", "没有"]
+      },
+      "known_gap": false,
+      "note": "2026-10-01 真服务探针暴露的缺口：模型有时自己手写一份方案、没调 plan_bulk_status，用户说「就按这个来」时无库可落。代码层拦住并请用户重出一遍，绝不退化成逐个直接写"
     }
   ]
 }

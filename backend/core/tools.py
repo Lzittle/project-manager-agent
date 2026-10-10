@@ -161,6 +161,40 @@ TOOLS: list[dict] = [
                                                 "member_name": {"type": "string"}}}}},
         [],
     ),
+    _fn(
+        "plan_bulk_status",
+        "批量改状态（一次动 2 个以上任务时**必须先调它**）：只拟方案、不写库。"
+        "先用 list_tasks 拿 id，再把 id 列表和目标状态传进来；用户确认后用 apply_bulk_action 落库",
+        {"task_ids": {"type": "array", "items": {"type": "integer"},
+                      "description": "要改的任务 id 列表"},
+         "status": {"type": "string", "enum": ["todo", "doing", "done"],
+                    "description": "目标状态"},
+         "project_id": {"type": "integer", "description": "项目 id（可省略，默认当前绑定项目）"}},
+        ["task_ids", "status"],
+    ),
+    _fn(
+        "plan_bulk_delete",
+        "批量删除（一次删 2 个以上任务时**必须先调它**）：只列清单让人拍板，一个字都不删。"
+        "用户确认后用 apply_bulk_action 落库；删除会连带清掉依赖边与评论，落库后仍可撤销",
+        {"task_ids": {"type": "array", "items": {"type": "integer"},
+                      "description": "要删除的任务 id 列表"},
+         "project_id": {"type": "integer", "description": "项目 id（可省略，默认当前绑定项目）"}},
+        ["task_ids"],
+    ),
+    _fn(
+        "apply_bulk_action",
+        "把待确认的批量方案（批量改状态/批量删除）真正落库。**仅在用户明确确认后**调用",
+        {"plan_id": {"type": "integer",
+                     "description": "方案 id（可省略：默认最近一份待确认的批量方案）"}},
+        [],
+    ),
+    _fn(
+        "undo_last_action",
+        "撤销最近一次落库的动作（指派 / 批量改状态 / 批量删除 / 单任务编辑）。"
+        "用户说「撤销/撤回/回退」时用它；没有可撤销的动作就如实告知",
+        {"run_id": {"type": "integer", "description": "台账 id（可省略：默认最近一次）"}},
+        [],
+    ),
 ]
 
 

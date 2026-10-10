@@ -5,7 +5,7 @@ from typing import Optional
 from core import llm
 from core.utils import PRI_CN
 from models.database import (SessionLocal, Task, KnowledgeDocument, AssignmentRun)
-from services import member_service, task_service
+from services import action_service, member_service, task_service
 
 
 class _TeamToolMixin:
@@ -55,7 +55,13 @@ class _TeamToolMixin:
                         "error": f"成员 {member_id} 不在名册里（先用 list_members 查，或用 create_member 建人）"}
             if self.project_id is not None and t.project_id != self.project_id:
                 return {"ok": False, "error": "该任务不在当前绑定的项目里，已拒绝跨项目指派"}
+            prev_assignee = t.assignee_id
             t = task_service.update_task(db, task_id, assignee_id=m.id)
+            # 留撤销台账（D-028）：指派可一句话回滚到原负责人
+            self._record_action("assign",
+                                [{"task_id": t.id, "title": t.title, "to": m.name}],
+                                [action_service.field_undo(t.id, assignee_id=prev_assignee)],
+                                project_id=t.project_id)
             return {"ok": True,
                     "data": {"id": t.id, "title": t.title, "status": t.status,
                              "project_id": t.project_id, "assignee_id": m.id,
@@ -223,7 +229,7 @@ class _TeamToolMixin:
                     except (TypeError, ValueError):
                         continue
 
-            applied, skipped, created = [], [], []
+            applied, skipped, created, undo = [], [], [], []
             for it in items:
                 task = db.get(Task, it.get("task_id"))
                 if task is None:
@@ -239,13 +245,20 @@ class _TeamToolMixin:
                     created.append({"name": m.name, "invite_code": m.invite_code})
                 else:
                     m = hits[0]
+                prev_assignee = task.assignee_id
                 task_service.update_task(db, task.id, assignee_id=m.id)
+                undo.append(action_service.field_undo(task.id, assignee_id=prev_assignee))
                 applied.append({"id": task.id, "title": task.title, "status": task.status,
                                 "assignee_id": m.id, "assignee_name": m.name})
 
             run.status = "applied"
             run.applied_count = len(applied)
             db.commit()
+            # 台账里记一笔：这一批指派可以整批撤回（D-028）
+            self._record_action("assign_batch",
+                                [{"task_id": a["id"], "title": a["title"],
+                                  "to": a["assignee_name"]} for a in applied],
+                                undo, project_id=run.project_id)
             return {"ok": True, "data": applied, "plan_id": run.id, "created_members": created,
                     "skipped": skipped,
                     "note": (f"已落库 {len(applied)} 条指派"
@@ -254,4 +267,3 @@ class _TeamToolMixin:
                              + "；只改了负责人，任务状态没动")}
         finally:
             db.close()
-

@@ -25,10 +25,15 @@ def build_system_prompt(project_id: Optional[int] = None,
    → assign_task；认不出人或有重名先问一句。
 7. 「按名单/人员说明分配」→ plan_assignment_from_doc（不写库）→ 把方案原样呈现并说明「还没落库」→
    仅当用户确认（「就按这个来」）后才 apply_assignment；微调用它自己的 overrides 参数。
-8. 纯闲聊直接回答，不调工具。"""
+8. 一次要动 2 个以上任务的新规矩：**先出方案、人拍板、再落库**——改状态 →
+   plan_bulk_status，删除 → plan_bulk_delete；方案要原样呈现并说明「还没落库」，
+   用户确认后才 apply_bulk_action。**方案必须由这两个工具生成**（它们会把方案存成待确认状态），
+   不要自己手写表格/清单——手写的方案在用户说「就按这个来」时落不了库。
+   别用 delete_task / update_task_* 逐个改一串（代码会拦）。
+9. 用户说「撤销/撤回/回退」→ undo_last_action，别自己猜要改回什么；没有可撤销的就如实说。
+10. 纯闲聊直接回答，不调工具。"""
     if project_id is not None:
         name = f"「{project_name}」" if project_name else ""
         prompt += (f"\n\n已绑定项目 {name}(id={project_id})：只围绕它工作，工具会自动落到该项目，"
                    "不要反问「哪个项目」，也不要提及或编造其他项目；要新建项目请让用户在页面上方操作。")
     return prompt
-

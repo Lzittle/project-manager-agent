@@ -10,10 +10,12 @@ from typing import Any, Optional
 
 from core import llm
 from core.executor import _ToolExecutor
-from core.intents import (find_project_mention, has_pending_assignment,
-                          is_apply_assignment_intent, is_ask_detail_intent,
+from core.intents import (find_project_mention, has_pending_action,
+                          has_pending_assignment, has_undoable_action,
+                          is_apply_action_intent, is_apply_assignment_intent,
+                          is_apply_missing_intent, is_ask_detail_intent,
                           is_assign_plan_intent, is_plan_intent, is_progress_query,
-                          resolve_bound_action)
+                          is_undo_intent, resolve_bound_action)
 from core.prompts import build_system_prompt
 from core.tools import READONLY_TOOL_NAMES, TOOLS, build_tools
 from core.utils import brief_error, clip
@@ -22,8 +24,9 @@ __all__ = [
     "Agent", "MAX_ITER", "TOOLS", "READONLY_TOOL_NAMES", "build_tools",
     "build_system_prompt", "resolve_bound_action", "is_plan_intent",
     "is_progress_query", "is_ask_detail_intent", "is_assign_plan_intent",
-    "is_apply_assignment_intent", "has_pending_assignment", "find_project_mention",
-    "clip", "brief_error",
+    "is_apply_assignment_intent", "is_apply_action_intent", "is_undo_intent",
+    "is_apply_missing_intent", "has_pending_assignment", "has_pending_action",
+    "has_undoable_action", "find_project_mention", "clip", "brief_error",
 ]
 
 MAX_ITER = 8  # 单轮最多工具迭代次数，防死循环

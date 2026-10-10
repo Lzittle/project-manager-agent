@@ -1,12 +1,12 @@
 """意图识别与确定性路由：把话交给模型之前，代码先拍板高确定性的情况。
 
 这些规则是行为承诺（跨项目写拦截 / 只给数量先追问 / 纯规划直行 / 名单分配 /
-确认落库 / 只读查询），值得单独放，而不是埋在 1300 行文件中间（D-025）。
+确认落库 / 一句话撤销 / 只读查询），值得单独放，而不是埋在 1300 行文件中间（D-025）。
 """
 import re
 from typing import Optional
 
-from models.database import AssignmentRun, NoteDraft
+from models.database import ActionRun, AssignmentRun, NoteDraft
 from services import project_service
 
 
@@ -130,12 +130,37 @@ def is_assign_plan_intent(text: str) -> bool:
 
 
 def is_apply_assignment_intent(text: str) -> bool:
-    """是否「确认把分配方案落库」。只在存在待确认方案时路由（见 resolve_bound_action），
-    所以这里可以宽松一点，也不用担心闲聊里的「确认」被误判。"""
+    """是否「确认把待确认方案落库」——分配方案、批量改状态/删除方案都认这一句。
+
+    只在真的有待确认方案时才路由（见 resolve_bound_action 的 has_pending_action），
+    所以这里可以宽松一点，也不用担心闲聊里的「确认」被误判。
+    """
     t = (text or "").strip()
     if not t or len(t) > 40:
         return False
     return bool(_APPLY_ASSIGN_HINT.search(t))
+
+
+# 同一件事的通用名：批量方案（D-028）也走这条路，保留旧名字给老调用方
+is_apply_action_intent = is_apply_assignment_intent
+
+# 只在**没有**待确认方案时才用的窄口径：明确指向「某份方案」的说法。
+# 刻意不含「开始吧 / 执行吧」—— 那两句在别的语境里是「开始干这个任务」（D-005）。
+_APPLY_MISSING_HINT = re.compile(
+    r"(?:就)?(?:按|照|依)(?:这个|这份|上述|上面的|你(?:说|给)的)(?:方案|分配|安排|名单)?(?:来|办|执行|落库)?"
+    r"|^(?:确认|确认吧|确认分配|同意|没问题|就这样|照这个来|落库)[，,。!！\s]*$")
+
+
+def is_apply_missing_intent(text: str) -> bool:
+    """说了「按这个来/确认」，但项目里**没有**待确认方案 —— 这时要如实说一句。
+
+    为什么需要它（2026-10-01 探针实测）：模型有时会自己手写一份方案呈现给用户，
+    却没有调用 plan_bulk_status / plan_bulk_delete 把它存成待确认状态。用户接着说
+    「就按这个来」时无库可落，如果放任走通用链路，模型可能改成逐个直接写任务、
+    只写进去一半。这里在代码层拦住，让用户把任务再说一遍重出方案。
+    """
+    t = (text or "").strip()
+    return bool(t) and len(t) <= 40 and bool(_APPLY_MISSING_HINT.search(t))
 
 
 def has_pending_assignment(db, user_id: int, project_id: int) -> bool:
@@ -143,6 +168,38 @@ def has_pending_assignment(db, user_id: int, project_id: int) -> bool:
     return (db.query(AssignmentRun)
             .filter_by(user_id=user_id, project_id=project_id, status="pending")
             .order_by(AssignmentRun.id.desc()).first()) is not None
+
+
+def has_pending_action(db, user_id: int, project_id: int) -> bool:
+    """该项目有没有任何一份待确认的方案（按名单分配 或 批量改状态/删除）。
+
+    「确认」这句话走哪条路，取决于**真的**有待确认方案 —— 没有的话，用户随口说的
+    「确认」、「好」不该触发任何落库（D-017 的老规矩，D-028 扩到批量方案）。
+    """
+    if has_pending_assignment(db, user_id, project_id):
+        return True
+    return (db.query(ActionRun)
+            .filter_by(user_id=user_id, project_id=project_id, status="pending")
+            .order_by(ActionRun.id.desc()).first()) is not None
+
+
+# ---------- 一句话撤销（阶段 3，D-028） ----------
+# 「撤销/撤回/回退」是明确的回滚意图：只在真有可撤销动作时才路由，代码层直接回滚，
+# 不交给模型自由发挥（模型很容易把「撤销」当成"再改一次"）。
+_UNDO_HINT = re.compile(r"撤销|撤回|回退|还原|恢复原样|恢复回去|反悔|改回来")
+
+
+def is_undo_intent(text: str) -> bool:
+    """是否「撤销上一次动作」。只认短句：长句里的「撤销」多半在说别的事。"""
+    t = (text or "").strip()
+    return bool(t) and len(t) <= 30 and bool(_UNDO_HINT.search(t))
+
+
+def has_undoable_action(db, user_id: int, project_id: int) -> bool:
+    """该项目有没有可以撤销的落库动作（撤销过的台账不算）。"""
+    return (db.query(ActionRun)
+            .filter_by(user_id=user_id, project_id=project_id, status="applied")
+            .order_by(ActionRun.id.desc()).first()) is not None
 
 
 # ---------- 记忆闭环：认「这是个决定」，先拟稿、确认后入库（D-027） ----------
@@ -156,7 +213,7 @@ _ARCHIVE_HINT = re.compile(r"纪要|归档|存进资料库|记进资料库|记�
 _NOTE_CONFIRM_HINT = re.compile(
     r"^(?:存|存吧|存入|记吧|记下来|好|好的|行|可以|嗯|对|确认|就这样|同意)[，,。!！\s]*$")
 _NOTE_DISCARD_HINT = re.compile(
-    r"^(?:不用|不用了|算了|别记|别记了|不存|不要|取消|撤回|删掉这条笔记)[，,。!！\s]*$")
+    r"^(?:不用|不用了|算了|别记|别记了|不存|不要|取消|删掉这条笔记)[，,。!！\s]*$")
 
 
 def is_conclusion_intent(text: str) -> bool:
@@ -204,6 +261,13 @@ def resolve_bound_action(db, user_id: int, bound_project_id: Optional[int],
       ("ask",      None)        要加任务但只给数量/没给明细（如「加两个任务」）
                                 → 先追问内容，绝不自动规划一整批；
       ("plan",      None)       纯规划意图 → 直接对绑定项目执行 plan_tasks；
+      ("assign_plan", None)     按名单分配 → 读名单拟方案（不写库）；
+      ("apply",     None)       有待确认方案（分配 / 批量改状态 / 批量删除）时的一句确认
+                                → 落库；
+      ("apply_missing", None)   说了「按这个来/确认」，但没有待确认方案
+                                → 如实说明并请用户重出一遍方案，绝不退化成逐个直接写；
+      ("undo",      None)       有可撤销动作时说「撤销/回退」→ 按台账回滚，不交给模型；
+      ("note_*",    None)       记忆闭环（拟稿 / 存 / 丢弃）；
       ("query",     None)       只读进度/状态查询 → 先注入真实任务数据再让模型作答；
       ("agent",     None)       其余 → 交给 Agent 工具循环（工具已按绑定项目裁剪）。
 
@@ -219,14 +283,21 @@ def resolve_bound_action(db, user_id: int, bound_project_id: Optional[int],
     # 「按名单安排任务」不该被当成「按项目主题自动规划一批任务」。
     if is_assign_plan_intent(message):
         return ("assign_plan", None)
-    if has_pending_assignment(db, user_id, bound_project_id) and is_apply_assignment_intent(message):
-        return ("apply", None)
-    # 记忆闭环：先看有没有草稿等着"存/不用"，再看这句话本身是不是个结论
+    # 「确认落库」既认分配方案也认批量方案（D-028）：只有真有待确认方案时才生效
+    if is_apply_action_intent(message):
+        return ("apply", None) if has_pending_action(db, user_id, bound_project_id) \
+            else (("apply_missing", None) if is_apply_missing_intent(message) else ("agent", None))
+    # 「撤销」是明确的回滚意图：有台账就代码层直接回滚，不让模型自己猜要改回什么
+    if has_undoable_action(db, user_id, bound_project_id) and is_undo_intent(message):
+        return ("undo", None)
+    # 有待确认草稿时，「确认/存」先算草稿的事（别被上面那条兜底抢走）
     if has_pending_note(db, user_id, bound_project_id):
         if is_note_discard_intent(message):
             return ("note_discard", None)
         if is_note_confirm_intent(message):
             return ("note_confirm", None)
+    if is_apply_missing_intent(message):
+        return ("apply_missing", None)
     if is_conclusion_intent(message):
         return ("note_draft", None)
     if is_plan_intent(message):
