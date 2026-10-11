@@ -306,7 +306,20 @@ async function loadDocuments() {
   } catch { documents.value = [] }
 }
 
+// 「我」的范围：登录后走服务端聚合（/tasks/mine，一次请求）；演示身份保留老路径。
+//
+// 为什么留两套：`/tasks/mine` 本身就是在回答「我是谁」，没有令牌直接 401（D-031）；
+// 而未登录时工作台仍以演示身份 alice 可用（D-030「只新增不替换老路径」），
+// 所以那条路继续用「逐项目拉取 + 前端按 assignee_id 过滤」。登录后页面照旧刷新即可切到新路径。
 async function loadMine() {
+  if (auth.isLoggedIn) {
+    try {
+      // 服务端已按名册身份裁剪，并把项目名挂在 project_name 上，这里统一成 _projectName 供分组用
+      mineTasks.value = (await taskApi.mine()).map((t) => ({ ...t, _projectName: t.project_name }))
+    } catch { mineTasks.value = [] }
+    return
+  }
+
   if (!store.projects.length) { mineTasks.value = []; return }
   try {
     const lists = await Promise.all(store.projects.map((p) => taskApi.list(p.id).catch(() => [])))
@@ -321,7 +334,7 @@ async function loadMine() {
   } catch { mineTasks.value = [] }
 }
 
-// 我的任务：按成员身份（assignee_id）过滤；名册还没到位时回退到名字匹配（D-010 的过渡办法）
+// 演示身份（未登录）下的前端过滤：按成员身份（assignee_id）；名册没到位时回退名字匹配（D-010 过渡办法）
 function isMine(t) {
   const me = myMember.value
   if (me) return t.assignee_id === me.id

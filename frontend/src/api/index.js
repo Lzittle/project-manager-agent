@@ -76,6 +76,9 @@ export const projectApi = {
 // ---------- 任务 ----------
 export const taskApi = {
   list: (projectId) => http.get('/tasks', { params: { project_id: projectId } }),
+  // 跨项目聚合「我」的任务（轮 4 / D-031）：一次请求拿全，替代前端逐项目拉取再过滤。
+  // ⚠️ 这个接口靠令牌认人，无令牌 → 401，所以只有登录后才调（演示身份走老路径）。
+  mine: () => http.get('/tasks/mine'),
   create: (data) => http.post('/tasks', data, { params: { user_id: currentUserId() } }),
   update: (id, data) => http.patch(`/tasks/${id}`, data),
   remove: (id) => http.delete(`/tasks/${id}`),
