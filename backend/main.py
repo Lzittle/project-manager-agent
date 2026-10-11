@@ -5,13 +5,15 @@ from fastapi import FastAPI
 
 from core.config import settings
 from models.database import init_db
-from api import projects, tasks, knowledge, chat, members
+from api import projects, tasks, knowledge, chat, members, auth
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用启动时初始化数据库（幂等：表已存在则跳过）"""
     init_db()
+    if settings.is_demo_secret:
+        print("[warn] SECRET_KEY 未配置，正在用 demo 默认密钥签发会话令牌 —— 生产请在 backend/.env 覆盖")
     yield
 
 
@@ -27,6 +29,7 @@ def health_check():
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(members.router, prefix="/api/members", tags=["members"])
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(knowledge.router, prefix="/api", tags=["knowledge"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 

@@ -8,6 +8,8 @@ const routes = [
   { path: '/overview', name: 'overview', component: () => import('../views/Dashboard.vue'), meta: { title: '总览' } },
   { path: '/board', name: 'board', component: () => import('../views/ProjectBoard.vue'), meta: { title: '项目看板' } },
   { path: '/knowledge', name: 'knowledge', component: () => import('../views/KnowledgeBase.vue'), meta: { title: '项目记忆' } },
+  // 轮 3（D-030）登录 / 注册 / 邀请码认领：可选入口，不拦未登录（演示身份照旧）
+  { path: '/auth', name: 'auth', component: () => import('../views/AuthView.vue'), meta: { title: '登录 / 注册' } },
   { path: '/chat', redirect: '/home' },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ]

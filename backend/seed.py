@@ -2,7 +2,6 @@
 
 用法: 在 backend/ 目录执行  ../venv/Scripts/python.exe seed.py
 """
-import hashlib
 from datetime import date
 
 from core import rag
@@ -10,12 +9,18 @@ from models.database import (
     SessionLocal, init_db,
     User, Member, Project, Task, KnowledgeDocument, ChatMessage,
 )
+from services.auth_service import hash_password
 
 DEMO_PASSWORD = "demo1234"
 
 
 def _hash(pwd: str) -> str:
-    return hashlib.sha256(pwd.encode()).hexdigest()
+    """与 services.auth_service.hash_password 同口径（轮 3，D-030）。
+
+    历史库里的密码是裸 sha256，登录时由 auth_service 兼容校验；
+    这里保持引用同一个实现，避免两套哈希写法再次分叉。
+    """
+    return hash_password(pwd)
 
 
 def seed() -> None:

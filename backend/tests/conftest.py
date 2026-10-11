@@ -42,6 +42,18 @@ def client():
         yield c
 
 
+@pytest.fixture()
+def db_session():
+    """直连测试库的 Session：给需要「绕过接口造数据」的用例用（如轮 3 的认领测试）。"""
+    from models.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 def pytest_sessionfinish(session, exitstatus):
     """测试结束后清理测试库文件与向量目录（失败不影响测试结论）。"""
     _cleanup_paths()

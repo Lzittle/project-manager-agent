@@ -15,17 +15,17 @@
           </div>
           <div class="hero-stats">
             <div class="hs">
-              <span class="hs-v">{{ stats.done }}</span>
+              <span class="hs-v"><i class="hs-dot s-done" />{{ stats.done }}</span>
               <span class="hs-k">已完成任务</span>
             </div>
             <i class="hs-div" />
             <div class="hs">
-              <span class="hs-v accent">{{ stats.doing }}</span>
+              <span class="hs-v"><i class="hs-dot s-doing" />{{ stats.doing }}</span>
               <span class="hs-k">进行中</span>
             </div>
             <i class="hs-div" />
             <div class="hs">
-              <span class="hs-v warn">{{ stats.blocked }}</span>
+              <span class="hs-v"><i class="hs-dot s-blocked" />{{ stats.blocked }}</span>
               <span class="hs-k">待解锁</span>
             </div>
           </div>
@@ -112,12 +112,12 @@
           </template>
           <div v-if="needs.length" class="needs">
             <div v-for="n in needs" :key="n.id" class="need-row" @click="goProject(n.project_id)">
-              <el-icon class="need-ic" color="var(--el-color-warning)"><WarningFilled /></el-icon>
+              <el-icon class="need-ic" color="var(--p-on-sand)"><WarningFilled /></el-icon>
               <div class="need-body">
                 <div class="need-title">{{ n.title }}</div>
                 <div class="need-proj">{{ n.project_name }}</div>
               </div>
-              <el-icon class="need-go" color="var(--el-text-color-placeholder)"><ArrowRight /></el-icon>
+              <el-icon class="need-go" color="var(--p-idle)"><ArrowRight /></el-icon>
             </div>
           </div>
           <div v-else class="needs-empty">没有待解锁任务，一切就绪</div>
@@ -231,6 +231,8 @@ const rails = computed(() => [...rows.value].sort((a, b) => b.pct - a.pct))
 const railDot = (r) => (r.status === 'archived' ? 'dot-archived' : `dot-${r.completion || 'none'}`)
 
 // ---------- 状态分布环形图 ----------
+// 色值取 v5 令牌的字面量（ECharts 配置拿不到 CSS 变量）：
+// ink #37352f · ink-2 #6b6a66 · idle #838d94 · line #e9e9e7 · brand #0f766e · ok #15794a
 function renderDonut() {
   if (!donutEl.value) return
   if (!donutChart) donutChart = echarts.init(donutEl.value)
@@ -239,24 +241,25 @@ function renderDonut() {
     tooltip: {
       trigger: 'item',
       formatter: '{b}：{c} 项（{d}%）',
-      backgroundColor: 'rgba(30,30,40,0.92)',
-      borderWidth: 0,
-      textStyle: { color: '#f7f8f8', fontSize: 13 },
+      backgroundColor: '#ffffff',
+      borderColor: '#e9e9e7',
+      borderWidth: 1,
+      textStyle: { color: '#37352f', fontSize: 13 },
     },
     legend: {
       bottom: 0,
       icon: 'circle',
       itemWidth: 10,
       itemHeight: 10,
-      textStyle: { color: '#6b7280', fontSize: 12 },
+      textStyle: { color: '#6b6a66', fontSize: 12 },
     },
     title: {
       text: String(total),
       subtext: '任务总数',
       left: 'center',
       top: '34%',
-      textStyle: { fontSize: 30, fontWeight: 700, color: '#1f2329' },
-      subtextStyle: { fontSize: 12, color: '#6b7280' },
+      textStyle: { fontSize: 30, fontWeight: 600, color: '#37352f' },
+      subtextStyle: { fontSize: 12, color: '#838d94' },
     },
     series: [{
       type: 'pie',
@@ -264,11 +267,11 @@ function renderDonut() {
       center: ['50%', '44%'],
       itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
       label: { show: false },
-      emphasis: { label: { show: true, fontSize: 15, fontWeight: 700, color: '#1f2329' } },
+      emphasis: { label: { show: true, fontSize: 15, fontWeight: 600, color: '#37352f' } },
       data: [
-        { value: todo, name: '待办', itemStyle: { color: '#9ca3af' } },
-        { value: doing, name: '进行中', itemStyle: { color: '#4f46e5' } },
-        { value: done, name: '已完成', itemStyle: { color: '#22c55e' } },
+        { value: todo, name: '待办', itemStyle: { color: '#838d94' } },
+        { value: doing, name: '进行中', itemStyle: { color: '#0f766e' } },
+        { value: done, name: '已完成', itemStyle: { color: '#15794a' } },
       ],
     }],
   }, true)
@@ -300,7 +303,7 @@ onUnmounted(() => {
 <style scoped>
 .dash { display: flex; flex-direction: column; gap: 16px; }
 
-/* ---------- Hero：深靛「指挥舱」叙事卡 ---------- */
+/* ---------- Hero：项目健康总览（v5 暖奶油白卡 + 石青；状态只用点，不刷彩色字） ---------- */
 .hero { border: none !important; }
 .hero :deep(.el-card__body) { padding: 0; }
 .hero-grid {
@@ -308,92 +311,107 @@ onUnmounted(() => {
   grid-template-columns: 1.1fr 1fr;
   gap: 40px;
   padding: 26px 30px;
-  background:
-    radial-gradient(120% 90% at 85% -20%, rgba(99, 102, 241, 0.16) 0%, transparent 55%),
-    linear-gradient(135deg, #1b1930 0%, #14121f 60%, #17142e 100%);
-  border-radius: var(--squad-radius-card);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  color: #f7f8f8;
+  background: var(--p-surface);
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-r-lg);
 }
 .hero-eyebrow {
-  font-size: 11px;
+  font-size: var(--p-fs-eyebrow);
   letter-spacing: 0.14em;
-  color: rgba(165, 160, 244, 0.9);
+  color: var(--p-idle);
   margin-bottom: 6px;
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
-.hero-refresh { letter-spacing: 0; color: rgba(255,255,255,0.7); }
-.hero-refresh:hover { color: #fff; }
-.hero-title { font-size: 18px; font-weight: 600; color: rgba(255,255,255,0.92); margin-bottom: 18px; }
+.hero-refresh { letter-spacing: 0; color: var(--p-ink-2); }
+.hero-refresh:hover { color: var(--p-ink); }
+.hero-title { font-size: var(--p-fs-title); font-weight: 500; color: var(--p-ink-2); margin-bottom: 18px; }
 .hero-num { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
-.hero-big { font-size: 52px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
-.hero-num-sub { color: rgba(255,255,255,0.55); font-size: 13px; }
+.hero-big {
+  font-size: 3.25rem; font-weight: 600; letter-spacing: -0.02em; line-height: 1;
+  color: var(--p-ink); font-variant-numeric: tabular-nums;
+}
+.hero-num-sub { color: var(--p-idle); font-size: var(--p-fs-meta); }
 .hero-stats { display: flex; align-items: center; gap: 20px; }
-.hs { display: flex; flex-direction: column; gap: 2px; }
-.hs-v { font-size: 22px; font-weight: 700; line-height: 1.1; }
-.hs-v.accent { color: #a5a0f4; }
-.hs-v.warn { color: #f3d19e; }
-.hs-k { font-size: 12px; color: rgba(255,255,255,0.5); }
-.hs-div { width: 1px; height: 26px; background: rgba(255,255,255,0.12); }
+.hs { display: flex; flex-direction: column; gap: 4px; }
+.hs-v {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 1.375rem; font-weight: 600; line-height: 1.1;
+  color: var(--p-ink); font-variant-numeric: tabular-nums;
+}
+.hs-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.hs-dot.s-done { background: var(--p-ok); }
+.hs-dot.s-doing { background: var(--p-brand); }
+.hs-dot.s-blocked { background: var(--p-on-sand); }
+.hs-k { font-size: var(--p-fs-tag); color: var(--p-idle); }
+.hs-div { width: 1px; height: 26px; background: var(--p-line); }
 
 .hero-right { align-self: center; }
 .hr-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
-.hr-title { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.85); }
-.hr-total { font-size: 12px; color: rgba(255,255,255,0.45); }
+.hr-title { font-size: var(--p-fs-ui); font-weight: 500; color: var(--p-ink-2); }
+.hr-total { font-size: var(--p-fs-tag); color: var(--p-idle); }
 .rail {
   display: flex; align-items: center; gap: 10px;
   padding: 7px 8px; margin-bottom: 4px;
-  border-radius: 8px;
+  border-radius: var(--p-r-sm);
   cursor: pointer;
   transition: background 0.15s var(--squad-ease);
 }
-.rail:hover { background: rgba(255,255,255,0.06); }
-.rail-name { width: 120px; font-size: 13px; color: rgba(255,255,255,0.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rail-track {
-  flex: 1; height: 4px; border-radius: 4px;
-  background: rgba(255,255,255,0.1); overflow: hidden;
+.rail:hover { background: var(--p-line-soft); }
+.rail-name {
+  width: 120px; font-size: var(--p-fs-ui); color: var(--p-ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.rail-track i { display: block; height: 100%; border-radius: 4px; background: #6366f1; }
-.rail-pct { width: 40px; text-align: right; font-size: 12px; color: rgba(255,255,255,0.6); font-variant-numeric: tabular-nums; }
+.rail-track {
+  flex: 1; height: 4px; border-radius: var(--p-r-pill);
+  background: var(--p-line-soft); overflow: hidden;
+}
+.rail-track i {
+  display: block; height: 100%; border-radius: var(--p-r-pill);
+  background: var(--p-brand); transition: width 0.4s var(--squad-ease);
+}
+.rail-pct { width: 40px; text-align: right; font-size: var(--p-fs-meta); color: var(--p-idle); font-variant-numeric: tabular-nums; }
 .rail-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.dot-done { background: #22c55e; }
-.dot-doing { background: #4f46e5; }
-.dot-none { background: rgba(255,255,255,0.28); }
-.dot-archived { background: rgba(255,255,255,0.16); }
-.hr-empty { color: rgba(255,255,255,0.4); font-size: 13px; padding: 12px 8px; }
+.dot-done { background: var(--p-ok); }
+.dot-doing { background: var(--p-brand); }
+.dot-none { background: var(--p-idle); }
+.dot-archived { background: var(--p-line); }
+.hr-empty { color: var(--p-idle); font-size: var(--p-fs-ui); padding: 12px 8px; }
 
-/* ---------- 主体：项目进度「轨道」 ---------- */
-.panel { border-radius: var(--squad-radius-card); }
+/* ---------- 主体：项目进度「轨道」（v5 令牌） ---------- */
+.panel { border-radius: var(--p-r-lg); }
 .panel-head { display: flex; align-items: baseline; gap: 10px; }
-.panel-sub { font-size: 12px; color: var(--el-text-color-placeholder); font-weight: 400; }
+.panel-sub { font-size: var(--p-fs-tag); color: var(--p-idle); font-weight: 400; }
 .proj-row {
   padding: 12px 4px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  border-bottom: 1px solid var(--p-line-soft);
   cursor: pointer;
   transition: background 0.15s var(--squad-ease);
 }
 .proj-row:last-child { border-bottom: none; }
-.proj-row:hover { background: var(--el-fill-color-lighter); }
+.proj-row:hover { background: var(--p-line-soft); }
 .proj-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .proj-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .proj-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.proj-dot.c-done { background: var(--el-color-success); }
-.proj-dot.c-doing { background: var(--el-color-primary); }
-.proj-dot.c-none { background: var(--el-text-color-placeholder); }
-.proj-name { font-weight: 600; color: var(--el-text-color-primary); font-size: 14px; }
-.proj-pct { font-size: 14px; font-weight: 700; color: var(--el-text-color-primary); font-variant-numeric: tabular-nums; }
+.proj-dot.c-done { background: var(--p-ok); }
+.proj-dot.c-doing { background: var(--p-brand); }
+.proj-dot.c-none { background: var(--p-idle); }
+.proj-name { font-weight: 500; color: var(--p-ink); font-size: var(--p-fs-body); }
+.proj-pct { font-size: var(--p-fs-body); font-weight: 600; color: var(--p-ink); font-variant-numeric: tabular-nums; }
 .proj-track {
-  height: 6px; border-radius: 6px; background: var(--el-fill-color-dark);
+  height: 6px; border-radius: var(--p-r-pill); background: var(--p-line-soft);
   overflow: hidden; margin-bottom: 8px;
 }
-.proj-track i { display: block; height: 100%; border-radius: 6px; background: var(--el-color-primary); transition: width 0.4s var(--squad-ease); }
+.proj-track i {
+  display: block; height: 100%; border-radius: var(--p-r-pill);
+  background: var(--p-brand); transition: width 0.4s var(--squad-ease);
+}
 .proj-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.proj-counts { font-size: 12px; color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; }
+.proj-counts { font-size: var(--p-fs-tag); color: var(--p-ink-2); font-variant-numeric: tabular-nums; }
 .proj-kids { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
 .kid { cursor: pointer; }
-.kid:hover { color: var(--el-color-primary); }
+.kid:hover { color: var(--p-brand); }
 
 .donut { height: 300px; }
 
@@ -402,22 +420,22 @@ onUnmounted(() => {
 .need-row {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 6px;
-  border-radius: 8px;
+  border-radius: var(--p-r-sm);
   cursor: pointer;
   transition: background 0.15s var(--squad-ease);
 }
-.need-row:hover { background: var(--el-fill-color-lighter); }
+.need-row:hover { background: var(--p-line-soft); }
 .need-ic { flex-shrink: 0; }
 .need-body { flex: 1; min-width: 0; }
 .need-title {
-  font-size: 13px; color: var(--el-text-color-primary);
+  font-size: var(--p-fs-ui); color: var(--p-ink);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.need-proj { font-size: 12px; color: var(--el-text-color-placeholder); }
+.need-proj { font-size: var(--p-fs-tag); color: var(--p-idle); }
 .need-go { flex-shrink: 0; }
 .needs-empty {
   padding: 18px 0; text-align: center;
-  color: var(--el-color-success); font-size: 13px;
+  color: var(--p-ok); font-size: var(--p-fs-ui);
 }
 
 @media (max-width: 992px) {

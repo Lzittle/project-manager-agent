@@ -5,14 +5,14 @@
     - 占位后认领：队长手填占位成员（placeholder + 邀请码），人注册后认领
     - 上传名单：Agent 读名单认人后写进同一条名册
 
-本层只管名册本身；「用邀请码认领」属于轮 3，「读名单认人」属于轮 2。
+本层只管名册本身；「读名单认人」属于轮 2；「用邀请码认领」在轮 3 已实现（见 claim_placeholder）。
 """
 import secrets
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from models.database import Member
+from models.database import Member, User
 
 # 邀请码字符集：去掉 I/O/0/1 这些容易看错的字符
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -70,3 +70,51 @@ def ensure_member_for_user(db: Session, user_id: int, name: str) -> Member:
     if m is not None:
         return m
     return create_member(db, name, user_id=user_id, status="active")
+
+
+def unique_member_name(db: Session, name: str) -> str:
+    """名册里取一个不撞名的名字：重名就加后缀（张三 → 张三(2)）。
+
+    名册**不同于项目名**，不强制唯一（现实里本来就会重名，且重名由「问人」处理，
+    见 find_by_name）。但注册时自动登记成成员这一步是系统行为、没人可问，
+    所以只在这里加后缀消歧，保证新账号不会一注册就制造一条需要人工裁决的歧义。
+    """
+    base = (name or "").strip() or "新成员"
+    if not find_by_name(db, base):
+        return base
+    n = 2
+    while find_by_name(db, f"{base}({n})"):
+        n += 1
+    return f"{base}({n})"
+
+
+def claim_placeholder(db: Session, user: User, invite_code: str) -> Member:
+    """用邀请码把占位成员认领到账号上（轮 3，D-030）。
+
+    认领只改 members 这一行（user_id 绑定、status 转 active、邀请码清空），
+    **不改 member.id** —— 任务的 assignee_id 指向成员 id，所以认领完成后
+    「之前被指派的活」自动归位到这本人身上，一条任务都不用改。
+
+    调用方负责把异常翻译成 HTTP 状态码；这里只负责业务前提判断。
+    """
+    code = (invite_code or "").strip().upper()
+    if not code:
+        raise ValueError("邀请码不能为空")
+
+    target = db.query(Member).filter(Member.invite_code == code).first()
+    if target is None:
+        raise LookupError("邀请码无效")
+    if target.user_id is not None or target.status != "placeholder":
+        raise PermissionError("这个邀请码已经被认领过了")
+
+    # 一个人只占名册一个位置：已有成员身份时不许再认领第二条
+    existing = member_for_user(db, user.id)
+    if existing is not None and existing.id != target.id:
+        raise FileExistsError(f"你已经以「{existing.name}」的身份在小队里了")
+
+    target.user_id = user.id
+    target.status = "active"
+    target.invite_code = None
+    db.commit()
+    db.refresh(target)
+    return target

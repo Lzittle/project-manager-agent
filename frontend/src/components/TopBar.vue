@@ -53,10 +53,13 @@
 
       <div class="tb-sep" />
 
-      <div class="user" title="演示用户">
-        <span class="user-avatar">a</span>
-        <span class="user-name">alice</span>
-      </div>
+      <!-- 身份（轮 3）：未登录是演示身份 alice；点开可登录 / 注册 / 邀请码认领 / 退出 -->
+      <IdentityMenu>
+        <template #trigger>
+          <span class="user-avatar">{{ auth.displayName.slice(0, 1).toUpperCase() }}</span>
+          <span class="user-name">{{ auth.displayName }}</span>
+        </template>
+      </IdentityMenu>
     </div>
   </header>
 </template>
@@ -66,8 +69,11 @@ import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { HomeFilled, Aim } from '@element-plus/icons-vue'
 import { useProjectStore, NO_PROJECT } from '../stores/project'
+import { useAuthStore } from '../stores/auth'
+import IdentityMenu from './IdentityMenu.vue'
 
 const store = useProjectStore()
+const auth = useAuthStore()
 const route = useRoute()
 
 const isHome = computed(() => route.path === '/')
@@ -84,57 +90,57 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/* v5 令牌（D-013）：暖中性灰阶 + 石青主色；圆角走 4/8/16/999；字号走 --p-fs-*（rem，跟顶栏「Aa」缩放） */
 .topbar {
   height: 60px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
-  background: rgba(255, 255, 255, 0.92);
+  padding: 0 1.25rem;
+  background: color-mix(in srgb, var(--p-surface) 92%, transparent);
   backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  border-bottom: 1px solid var(--p-line);
 }
-.tb-left, .tb-right { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
-.brand-mark { width: 30px; height: 30px; border-radius: 8px; box-shadow: var(--el-box-shadow-lighter); }
+.tb-left, .tb-right { display: flex; align-items: center; gap: 0.875rem; min-width: 0; }
+.brand { display: flex; align-items: center; gap: 0.625rem; text-decoration: none; }
+.brand-mark { width: 30px; height: 30px; border-radius: var(--p-r-sm); }
 .brand-text { line-height: 1.1; }
-.brand-name { font-size: 18px; font-weight: 800; color: var(--el-text-color-primary); letter-spacing: 0.2px; display: block; }
-.brand-sub { font-size: 10px; color: var(--el-text-color-placeholder); letter-spacing: 2px; }
-.tb-sep { width: 1px; height: 22px; background: var(--el-border-color-lighter); }
+.brand-name { font-size: 1.125rem; font-weight: 800; color: var(--p-ink); letter-spacing: 0.2px; display: block; }
+.brand-sub { font-size: var(--p-fs-eyebrow); color: var(--p-idle); letter-spacing: 2px; }
+.tb-sep { width: 1px; height: 22px; background: var(--p-line); }
 
 .workbench {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: 34px;
-  padding: 0 14px;
-  border-radius: 999px;
-  font-size: 13px;
+  padding: 0 0.875rem;
+  border-radius: var(--p-r-pill);
+  font-size: var(--p-fs-ui);
   font-weight: 600;
-  color: var(--el-text-color-secondary);
+  color: var(--p-ink-2);
   text-decoration: none;
   transition: background 0.15s var(--squad-ease), color 0.15s var(--squad-ease);
 }
-.workbench:hover { background: var(--el-fill-color); color: var(--el-text-color-primary); }
-.workbench.active { background: var(--el-color-primary-light-9); color: var(--el-color-primary-dark-2); }
+.workbench:hover { background: var(--p-line-soft); color: var(--p-ink); }
+.workbench.active { background: var(--p-brand-wash); color: var(--p-brand-strong); }
 
-.ctx { display: flex; align-items: center; gap: 8px; }
-.ctx-label { font-size: 12px; color: var(--el-text-color-placeholder); }
+.ctx { display: flex; align-items: center; gap: 0.5rem; }
+.ctx-label { font-size: var(--p-fs-meta); color: var(--p-idle); }
 .ctx-select { width: 220px; }
-.opt-global { display: inline-flex; align-items: center; gap: 6px; color: var(--el-text-color-regular); }
-.opt-global .el-icon { color: var(--el-color-primary); }
-.opt-child { color: var(--el-text-color-regular); }
-.ctx-empty { font-size: 13px; color: var(--el-text-color-placeholder); }
+.opt-global { display: inline-flex; align-items: center; gap: 6px; color: var(--p-ink-2); }
+.opt-global .el-icon { color: var(--p-brand); }
+.opt-child { color: var(--p-ink-2); }
+.ctx-empty { font-size: var(--p-fs-ui); color: var(--p-idle); }
 
-.user { display: flex; align-items: center; gap: 8px; }
 .user-avatar {
   width: 28px; height: 28px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  background: var(--el-color-primary); color: #fff;
-  font-size: 13px; font-weight: 700; text-transform: uppercase;
+  background: var(--p-brand); color: #fff;
+  font-size: var(--p-fs-ui); font-weight: 700; text-transform: uppercase;
 }
-.user-name { font-size: 13px; color: var(--el-text-color-regular); }
+.user-name { font-size: var(--p-fs-ui); color: var(--p-ink-2); }
 
 @media (max-width: 720px) {
   .brand-sub, .user-name, .ctx-label { display: none; }

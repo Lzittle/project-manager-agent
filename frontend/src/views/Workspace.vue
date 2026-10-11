@@ -75,7 +75,12 @@
       >Aa · {{ fontLabel }}</button>
       <span class="ws-sr" aria-live="polite">字号已切到{{ fontLabel }}</span>
 
-      <span class="ws-avatar">{{ meName.slice(0, 1).toUpperCase() }}</span>
+      <!-- 身份入口（轮 3）：工作台隐藏了顶栏，身份菜单就挂在右上角头像上 -->
+      <IdentityMenu>
+        <template #trigger>
+          <span class="ws-avatar" :title="'身份：' + meName">{{ meName.slice(0, 1).toUpperCase() }}</span>
+        </template>
+      </IdentityMenu>
     </header>
 
     <div class="ws-main" :class="{ 'is-full': liveFull }">
@@ -174,22 +179,25 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { chatApi, knowledgeApi, memberApi, taskApi, USER_ID } from '../api'
+import { chatApi, knowledgeApi, memberApi, taskApi } from '../api'
 import { useProjectStore } from '../stores/project'
+import { useAuthStore } from '../stores/auth'
 // 工作台按组件拆开（D-026）：常量与纯函数在 workspace/constants.js，四个组件各管一块
 import ChatPanel from '../components/workspace/ChatPanel.vue'
 import LivePanel from '../components/workspace/LivePanel.vue'
 import MemberRoster from '../components/workspace/MemberRoster.vue'
+import IdentityMenu from '../components/IdentityMenu.vue'
 import { DOC_PREVIEW_CHARS, FONT_SCALES, STATUS, docTypeLabel, isBlocked, repoDocs }
   from '../components/workspace/constants.js'
 
 const store = useProjectStore()
+const auth = useAuthStore()   // 「我」是谁（轮 3）：登录后按账号，未登录回落演示身份
 
 // 名册（小队成员）：占位成员也能被指派，注册后认领（D-017 / D-018）
 const members = ref([])
-const myMember = computed(() => members.value.find((m) => m.user_id === USER_ID) || null)
-// 「我」= 当前账号在名册里对应的成员；名册还没到位时回退到演示用户名（D-003 的过渡）
-const meName = computed(() => myMember.value?.name || 'alice')
+const myMember = computed(() => members.value.find((m) => m.user_id === auth.userId) || null)
+// 「我」= 当前账号在名册里对应的成员；登录了但还没认领时，先亮账号名（D-003 的过渡）
+const meName = computed(() => auth.memberName || myMember.value?.name || auth.username)
 const scope = ref('team')          // team | me
 const filter = ref('all')          // all | todo | doing
 const assetsOpen = ref(true)
@@ -490,6 +498,8 @@ onMounted(async () => {
 })
 
 watch(() => store.currentId, () => { reloadAll() })
+// 身份切换（登录 / 认领 / 退出）后上下文全变：对话、任务、「我」的范围都要重取
+watch(() => auth.userId, () => { reloadAll() })
 </script>
 
 

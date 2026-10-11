@@ -55,9 +55,17 @@ class Settings:
     OPENAI_BASE_URL: str = _get("OPENAI_BASE_URL", "https://api.openai.com/v1")
     LLM_MODEL: str = _get("LLM_MODEL", "gpt-4o-mini")
 
+    # 会话令牌签名密钥（轮 3，D-030）：没配就用 demo 默认值并在启动时提醒。
+    # 生产必须通过 backend/.env 覆盖，否则任何人拿到代码都能伪造令牌。
+    SECRET_KEY: str = _get("SECRET_KEY", "")
+
     @property
     def has_api_key(self) -> bool:
         return bool(self.OPENAI_API_KEY) and not self.OPENAI_API_KEY.startswith("sk-xxx")
+
+    @property
+    def is_demo_secret(self) -> bool:
+        return not self.SECRET_KEY
 
 
 settings = Settings()

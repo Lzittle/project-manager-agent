@@ -195,3 +195,39 @@ class ChatMessageOut(BaseModel):
     content: str
     trace: Optional[list] = None  # 助手消息的 Agent 执行轨迹（工具步骤），由 DB JSON 文本解析而来
     created_at: Optional[datetime] = None
+
+
+# ---------- 认证（轮 3，D-030） ----------
+class RegisterRequest(BaseModel):
+    """注册：账号密码两层里的「账号」；注册即登记为 active 成员（注册入队）。"""
+    username: str = Field(min_length=1, max_length=50)
+    email: str = Field(min_length=3, max_length=120)
+    password: str = Field(min_length=6, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=50)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class MeOut(BaseModel):
+    """当前登录身份：账号信息 + 对应的名册成员（认领后才有 member）。"""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    email: str
+    member_id: Optional[int] = None    # 名册上的成员 id（任务的 assignee_id 指向它）
+    member_name: Optional[str] = None
+    member_status: Optional[str] = None
+
+
+class AuthOut(BaseModel):
+    """注册 / 登录的响应：令牌 + 当前身份。"""
+    token: str
+    user: MeOut
+
+
+class ClaimRequest(BaseModel):
+    """用邀请码认领占位成员（轮 3，D-030）。"""
+    invite_code: str = Field(min_length=1, max_length=20)

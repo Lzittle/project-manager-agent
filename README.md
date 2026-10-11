@@ -135,6 +135,7 @@ npm run dev                   # http://localhost:5173 （已代理 /api → 后�
 | AI 对话（绑定项目） | `删掉「XX」任务` / `把「XX」改名为 YY` | 调 `delete_task` / `update_task_fields` |
 | AI 对话（绑定项目） | 上传会议纪要后问 `上次怎么定的登录方案` | 轨迹首屏"检索项目记忆"，按原文作答 |
 | 数据仪表盘 | — | 任务/项目状态实时派生，与看板一致 |
+| 登录 / 注册 | 右上角头像 → 登录 / 注册（或直接打开 `/#/auth`） | 注册即入队：新账号立刻登记为 active 成员；队长手填的占位成员可**用邀请码认领**——认领后指派到那条占位的活自动归位到本人 |
 
 ---
 
@@ -151,8 +152,9 @@ npm run dev                   # http://localhost:5173 （已代理 /api → 后�
 
 ## 数据模型（核心表）
 
-`users` / `projects` / `tasks` / `task_dependencies` / `task_comments` / `chat_messages` / `knowledge_documents`
+`users` / `members` / `projects` / `tasks` / `task_dependencies` / `task_comments` / `chat_messages` / `knowledge_documents`
 
+- **User / Member 两层（D-018 / D-030）**：账号（`users`）只管登录；名册成员（`members`）是"人"的实体，任务的 `assignee_id` 指向它。占位成员没有账号（`status=placeholder` + 邀请码），对方登录后凭邀请码**认领**——认领只改这一行（绑定账号、转 active、作废邀请码），**成员 id 不变**，所以原先指派到这条占位的活自动归位，不需要迁移任何任务数据。
 - **TaskDependency**：任务依赖建模（task 依赖 depends_on 前置任务），服务层校验**自依赖 / 跨项目 / 成环**，支持"前置延期 → 影响哪些下游"的影响分析（`/api/tasks/{id}/impact`）
 - **KnowledgeDocument.doc_type**：`doc`（需求/方案文档）与 `meeting`（会议纪要，项目长期记忆）同库分型
 - **ChatMessage.trace**：Agent 执行轨迹 JSON（每步工具 + 受影响实体），历史消息可回放
@@ -197,8 +199,9 @@ project-manager-agent/
 - [x] LLM 工程化：chat_json 结构化输出 + 解析失败重试
 - [x] 可观测：执行轨迹 trace + 实体引用跳看板 + 一键演示
 - [x] 前端：仪表盘（派生完成度）/ 看板（拖拽流转）/ AI 对话 / 知识库
+- [x] 账号与身份：注册 / 登录（pbkdf2 密码 + HMAC 签名会话令牌）+ 邀请码认领名册成员；登录是**可选**入口，未登录仍按演示身份运行（D-030）
 - [x] Docker 一键部署 + nginx 反代 + 数据卷持久化
-- [x] 质量：pytest **37 用例**（LLM mock 离线，CI 可跑）
+- [x] 质量：pytest **76 用例**（LLM mock 离线，CI 可跑）+ 真模型行为评测 79 条 / 终态评测 5 条（`backend/eval/`）
 - [ ] Roadmap：Risk 风险登记与自动评估 / 迭代周报生成 / SSE 流式输出 / Agent 记忆压缩
 
 ---

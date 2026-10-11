@@ -14,10 +14,16 @@
 </template>
 
 <script setup>
+import { onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import TopBar from './components/TopBar.vue'
+import { useAuthStore } from './stores/auth'
 
 const route = useRoute()
+const auth = useAuthStore()
+
+// 启动时复核一次登录状态（令牌过期/被改就静默登出，回落到演示身份）
+onMounted(() => { auth.restore() })
 </script>
 
 <style>
@@ -42,6 +48,7 @@ html, body, #app { height: 100%; }
 .w-board { max-width: 1240px; }
 .w-knowledge { max-width: 1120px; }
 .w-chat { max-width: 940px; }
+.w-auth { max-width: 620px; padding: 0; }
 .w-workspace { max-width: none; padding: 0; height: 100%; animation: none; }
 
 /* 面板级切页动效：轻抬 + 极淡滑动 */
