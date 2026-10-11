@@ -1,13 +1,21 @@
 """任务接口 /api/tasks（含评论子资源与依赖子资源）
 
 列表/创建通过 ?project_id= 定位项目；user_id 用于记录创建人/评论人。
+
+**可见性（轮 4 / D-031）**：带令牌的请求按视角裁剪 —— 队长（项目创建者）看全部，
+组员只看派给自己的；不带令牌（老路径 `?user_id=`，评测/探针/Agent 走这条）不过滤。
+另提供 `GET /mine`（跨项目、按名册身份聚合）给前端「我」的范围用，替代逐项目拉取再过滤。
 """
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from models.database import get_db, Task, Member
-from models.schemas import TaskCreate, TaskUpdate, TaskOut, CommentCreate, CommentOut, DependencyCreate
-from services import task_service
+from api.auth import optional_viewer
+from models.database import get_db, Task, Member, Project
+from models.schemas import (CommentCreate, CommentOut, DependencyCreate,
+                            MyTaskOut, TaskCreate, TaskOut, TaskUpdate)
+from services import task_service, visibility
 
 router = APIRouter()
 
@@ -62,9 +70,31 @@ def _list_with_deps(db: Session, tasks) -> list[dict]:
 
 
 @router.get("", response_model=list[TaskOut])
-def list_tasks(project_id: int = Query(..., description="项目 id"), db: Session = Depends(get_db)):
+def list_tasks(project_id: int = Query(..., description="项目 id"),
+               viewer: Optional[visibility.Viewer] = Depends(optional_viewer),
+               db: Session = Depends(get_db)):
+    """项目任务。带令牌时按视角裁剪：队长看全部，组员只看派给自己的（D-031）。"""
     tasks = task_service.list_tasks(db, project_id)
-    return _list_with_deps(db, tasks)
+    return _list_with_deps(db, visibility.visible_tasks(db, project_id, tasks, viewer))
+
+
+@router.get("/mine", response_model=list[MyTaskOut])
+def list_my_tasks(viewer: Optional[visibility.Viewer] = Depends(optional_viewer),
+                  db: Session = Depends(get_db)):
+    """跨项目：派给「我」的全部任务（前端「我」的范围专用）。
+
+    必须在 `/{task_id}` **之前**声明，否则 "mine" 会被当成 task_id 匹配走。
+    没有令牌 → 401（这个接口本身就是问「我是谁」）；有令牌但没认领名册 → 空列表。
+    """
+    if viewer is None:
+        raise HTTPException(401, "请先登录再查看「我」的任务")
+    tasks = visibility.mine_tasks(db, viewer)
+    rows = _list_with_deps(db, tasks)
+    # 带上项目名：跨项目列表不点进去也要能认出「这是哪个项目的活」
+    names = {p.id: p.name for p in db.query(Project).all()}
+    for r in rows:
+        r["project_name"] = names.get(r["project_id"])
+    return rows
 
 
 @router.post("", response_model=TaskOut, status_code=201)

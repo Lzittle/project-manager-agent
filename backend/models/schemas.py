@@ -121,6 +121,15 @@ class TaskOut(BaseModel):
     blocked_by_count: Optional[int] = 0
 
 
+class MyTaskOut(TaskOut):
+    """「我」的任务（跨项目，D-031）：在任务字段之外多带项目名。
+
+    跨项目列表里同一个任务标题可能来自不同项目，不点进去也要能认出「这是哪个项目的活」，
+    所以由接口层一次查表补 `project_name`（不是 tasks 表的列）。
+    """
+    project_name: Optional[str] = None
+
+
 # ---------- 任务依赖 ----------
 class DependencyCreate(BaseModel):
     task_id: int

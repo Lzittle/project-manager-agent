@@ -146,3 +146,15 @@ def resolve_user(db: Session, token: Optional[str]) -> Optional[User]:
     if uid is None:
         return None
     return db.get(User, uid)
+
+
+def token_from_header(authorization: Optional[str]) -> str:
+    """从 `Authorization` 头里取出令牌（兼容带 / 不带 `Bearer ` 前缀）。
+
+    三个调用点（auth.me / members.claim / 可见性依赖）原本各写一遍同样的切片，
+    收敛到这里，避免「有一处忘了 strip 前缀」这种不一致。
+    """
+    raw = (authorization or "").strip()
+    if raw.lower().startswith("bearer "):
+        return raw[7:].strip()
+    return raw

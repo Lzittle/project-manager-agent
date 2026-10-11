@@ -54,6 +54,45 @@ def db_session():
         db.close()
 
 
+# 清理顺序：先子表后主表（SQLite 默认不强制外键，但按依赖顺序更稳）
+_ISOLATION_TABLES = None
+
+
+def _isolation_tables():
+    """懒加载表清单：避免 conftest 导入期就把模型全拉起来。"""
+    global _ISOLATION_TABLES
+    if _ISOLATION_TABLES is None:
+        from models.database import (ActionRun, AssignmentRun, ChatMessage,
+                                     KnowledgeDocument, Member, NoteDraft, PlanRun,
+                                     Project, Task, TaskComment, TaskDependency, User)
+        _ISOLATION_TABLES = [TaskDependency, TaskComment, ChatMessage, ActionRun, AssignmentRun,
+                             PlanRun, NoteDraft, KnowledgeDocument, Task, Project, Member, User]
+    return _ISOLATION_TABLES
+
+
+@pytest.fixture()
+def isolate_db(db_session):
+    """「用完即清」隔离（opt-in）：记下各表 max(id)，用例结束后删掉新增行。
+
+    为什么需要：本仓库的测试**共用一个文件库**（只在会话开始清一次），
+    于是「注册一个账号」会占掉 `user_id=1`，而 `create_task` 会把创建者的成员身份
+    默认设成负责人 —— 后续用例里 `user_id=1` 的含义就被悄悄改掉了
+    （实例：`test_bulk_actions` 的「撤销后负责人为空」会被带偏成 6）。
+    注册类 / 造账号类用例用这个夹具把自己的痕迹擦掉，就不必去改既有用例的假设。
+
+    注意：它是 **opt-in** 而不是 autouse —— 有些模块的用例之间有数据依赖，
+    全局清库会误伤。要用的模块自己声明 autouse 包一层。
+    """
+    from sqlalchemy import func
+
+    models = _isolation_tables()
+    baseline = {m: db_session.query(func.max(m.id)).scalar() or 0 for m in models}
+    yield
+    for model in models:
+        db_session.query(model).filter(model.id > baseline[model]).delete(synchronize_session=False)
+    db_session.commit()
+
+
 def pytest_sessionfinish(session, exitstatus):
     """测试结束后清理测试库文件与向量目录（失败不影响测试结论）。"""
     _cleanup_paths()

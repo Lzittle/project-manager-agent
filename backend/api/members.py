@@ -41,7 +41,7 @@ def claim_member(body: ClaimRequest, authorization: str = Header(default=""),
     因为任务的 assignee_id 指向**成员 id**、认领不改 id，原先指派给这个占位的活
     自动归位到本人 —— 不需要迁移任何任务数据。
     """
-    token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else authorization.strip()
+    token = auth_service.token_from_header(authorization)
     user = auth_service.resolve_user(db, token)
     if user is None:
         raise HTTPException(401, "请先登录再认领成员身份")

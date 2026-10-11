@@ -11,31 +11,22 @@
 把库还原到进来时的样子 —— 不动既有用例，也不用改它们的假设。
 """
 import pytest
-from sqlalchemy import func
 
-from models.database import (ActionRun, AssignmentRun, ChatMessage,
-                             KnowledgeDocument, Member, NoteDraft, PlanRun,
-                             Project, Task, TaskComment, TaskDependency, User)
+from models.database import User
 from services import auth_service
 
 PW = "pw123456"
 
-# 清理顺序：先子表后主表（SQLite 默认不强制外键，但按依赖顺序更稳）
-_TABLES_CHILD_FIRST = [
-    TaskDependency, TaskComment, ChatMessage, ActionRun, AssignmentRun,
-    PlanRun, NoteDraft, KnowledgeDocument, Task, Project, Member, User,
-]
-
 
 @pytest.fixture(autouse=True)
-def _isolate_shared_db(db_session):
-    """记录进来时各表的 max(id)，用例结束后删掉新增行（本模块自带隔离）。"""
-    baseline = {m: db_session.query(func.max(m.id)).scalar() or 0
-                for m in _TABLES_CHILD_FIRST}
+def _isolate_shared_db(isolate_db):
+    """本模块自带隔离（实现见 conftest 的 `isolate_db`）：跑完把新增行擦掉。
+
+    原因：本仓库测试共用一个文件库，而注册会把 `user_id=1` 占掉，
+    `create_task` 又会把创建者的成员身份默认设成负责人 —— 后续用例里
+    `user_id=1` 的含义会因此改变。擦干净就不必去改既有用例的假设。
+    """
     yield
-    for model in _TABLES_CHILD_FIRST:
-        db_session.query(model).filter(model.id > baseline[model]).delete(synchronize_session=False)
-    db_session.commit()
 
 
 def _register(client, username, email=None, password=PW):
