@@ -311,7 +311,7 @@
   width: 236px; max-width: 100%;
   padding: 8px; text-align: left;
   background: var(--ws-surface); border: 1px solid var(--ws-line);
-  border-radius: var(--p-r-lg); box-shadow: var(--el-box-shadow-dark);
+  border-radius: var(--p-r-lg); box-shadow: var(--p-shadow-3);
 }
 .ws-pophead { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; padding: 2px 4px 6px; }
 .ws-pophead b { font-size: var(--p-fs-ui); font-weight: 600; }

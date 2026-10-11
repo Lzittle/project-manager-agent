@@ -123,7 +123,7 @@ const rendered = computed(() => miniMd(props.content))
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0; color: #fff; font-size: 16px;
-  box-shadow: var(--el-box-shadow-lighter);
+  box-shadow: var(--p-shadow-1);
 }
 .avatar.assistant { background: linear-gradient(135deg, #14a08f, var(--p-brand) 60%, var(--p-brand-strong)); }
 .avatar.user { background: var(--p-line-soft); color: var(--p-ink-2); }
@@ -141,7 +141,7 @@ const rendered = computed(() => miniMd(props.content))
   border: 1px solid var(--p-line-soft);
   color: var(--p-ink);
   border-top-left-radius: 4px;
-  box-shadow: 0 1px 2px rgba(16, 22, 25, 0.04);
+  box-shadow: var(--p-shadow-1);
 }
 .user .bubble {
   background: var(--p-brand-wash);
@@ -157,8 +157,8 @@ const rendered = computed(() => miniMd(props.content))
 .bubble :deep(.mm-ol) { list-style: decimal; }
 .bubble :deep(.mm-gap) { height: 7px; }
 .bubble :deep(.mm-code) {
-  background: var(--el-fill-color);
-  border: 1px solid var(--el-border-color-extra-light);
+  background: var(--p-block-plain);
+  border: 1px solid var(--p-line-soft);
   padding: 1px 5px;
   border-radius: var(--p-r-xs);
   font-size: var(--p-fs-tag);

@@ -147,17 +147,17 @@ body {
               transform 0.18s var(--squad-ease);
 }
 .el-card.is-hover-shadow:hover {
-  box-shadow: var(--el-box-shadow-light) !important;
+  box-shadow: var(--p-shadow-2) !important;
 }
 
 /* ---------- 弹层/对话框：白底 + 克制圆角 ---------- */
 .el-popper, .el-dialog, .el-message-box, .el-dropdown-menu {
-  border-radius: var(--squad-radius-lg);
-  box-shadow: var(--el-box-shadow-dark);
+  border-radius: var(--p-r-lg);
+  box-shadow: var(--p-shadow-3);
   border: 1px solid var(--el-border-color-light);
 }
 .el-dialog {
-  border-radius: var(--squad-radius-lg);
+  border-radius: var(--p-r-lg);
 }
 .el-dialog__title { font-weight: 700; color: var(--el-text-color-primary); }
 .el-dialog__header { padding: 18px 20px 0; }
@@ -217,7 +217,7 @@ body {
 .el-tag--plain { background: var(--el-bg-color); }
 
 /* ---------- 消息提示（10px 不在 v5 四档内 → 归到 8px） ---------- */
-.el-message { border-radius: var(--p-r-sm); box-shadow: var(--el-box-shadow-dark); border: 1px solid var(--el-border-color-light); }
+.el-message { border-radius: var(--p-r-sm); box-shadow: var(--p-shadow-3); border: 1px solid var(--el-border-color-light); }
 
 /* ---------- 表格（记忆库用） ---------- */
 .el-table { --el-table-border-color: var(--el-border-color-lighter); --el-table-header-bg-color: var(--el-fill-color-lighter); }
@@ -319,6 +319,11 @@ body {
   /* 动效时长（曲线统一用 --squad-ease，全站一套节奏） */
   --p-dur-fast: 0.12s;
   --p-dur: 0.18s;
+
+  /* 阴影：三级，色相走暖灰 #37352f（与整套 v5 暖中性一致，不再是 v3 的冷灰 #1a1d21） */
+  --p-shadow-1: 0 1px 2px rgba(55, 53, 47, 0.04);
+  --p-shadow-2: 0 2px 10px -2px rgba(55, 53, 47, 0.06), 0 1px 2px rgba(55, 53, 47, 0.04);
+  --p-shadow-3: 0 12px 32px -8px rgba(55, 53, 47, 0.16), 0 2px 8px rgba(55, 53, 47, 0.05);
 }
 
 /* ==========================================================================
