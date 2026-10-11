@@ -18,7 +18,7 @@
           :on-change="onFileChange"
           style="flex: 1"
         >
-          <div style="padding: 6px 0">
+          <div style="padding: 2px 0">
             <el-icon :size="26" color="var(--p-brand)"><UploadFilled /></el-icon>
             <div class="upload-text">拖入或点击上传 .txt / .md 文档（UTF-8），自动进入知识库可被 Agent 检索</div>
           </div>
@@ -173,8 +173,21 @@ onMounted(async () => {
 /* v5 令牌（D-013）：卡片按「面板」规 16 圆角；正文预览走 line-soft 底 + 阅读行高 */
 .kb-inlet { margin-bottom: 16px; }
 .kb-inlet, .kb-panel { border-radius: var(--p-r-lg); }
-.toolbar { display: flex; gap: 12px; align-items: center; }
-.upload-text { color: var(--p-ink-2); font-size: var(--p-fs-ui); line-height: var(--p-lh-read); }
+.toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+/* 拖拽上传区收紧凑 —— 否则它比两侧控件高一大截，整行看着「飘」 */
+.kb-inlet :deep(.el-upload-dragger) {
+  padding: 11px 12px;
+  border: 1px dashed var(--p-line);
+  border-radius: var(--p-r-sm);
+  background: transparent;
+  transition: border-color var(--p-dur-fast) var(--squad-ease), background var(--p-dur-fast) var(--squad-ease);
+}
+.kb-inlet :deep(.el-upload-dragger:hover),
+.kb-inlet :deep(.el-upload-dragger.is-dragover) {
+  border-color: var(--p-brand-line);
+  background: var(--p-brand-wash);
+}
+.upload-text { color: var(--p-ink-2); font-size: var(--p-fs-ui); line-height: var(--p-lh-ui); }
 .doc-preview {
   white-space: pre-wrap;
   word-break: break-word;

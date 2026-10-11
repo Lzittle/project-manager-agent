@@ -179,7 +179,16 @@ body {
 }
 
 /* ---------- 按钮 ---------- */
-.el-button { font-weight: 500; border-radius: var(--el-border-radius-base); }
+.el-button {
+  font-weight: 500;
+  border-radius: var(--p-r-sm);
+  transition: background-color var(--p-dur-fast) var(--squad-ease),
+              border-color var(--p-dur-fast) var(--squad-ease),
+              color var(--p-dur-fast) var(--squad-ease),
+              transform var(--p-dur-fast) var(--squad-ease);
+}
+/* 按下微下沉 0.5px：给「可点」一点实体感（不影响布局） */
+.el-button:not(.is-disabled):active { transform: translateY(0.5px); }
 .el-button--primary {
   --el-button-bg-color: var(--el-color-primary);
   --el-button-border-color: var(--el-color-primary);
@@ -195,15 +204,15 @@ body {
   --el-button-hover-border-color: var(--el-color-primary);
 }
 
-/* ---------- 标签 Tag ---------- */
-.el-tag { border-radius: 6px; font-weight: 500; }
+/* ---------- 标签 Tag（徽标语义 → 4px，与任务卡优先级软块一致） ---------- */
+.el-tag { border-radius: var(--p-r-xs); font-weight: 500; }
 .el-tag--light.el-tag--success { background: var(--el-color-success-light-9); color: var(--el-color-success-dark-2); border-color: var(--el-color-success-light-7); }
 .el-tag--light.el-tag--warning { background: var(--el-color-warning-light-9); color: var(--el-color-warning-dark-2); border-color: var(--el-color-warning-light-7); }
 .el-tag--light.el-tag--danger { background: var(--el-color-danger-light-9); color: var(--el-color-danger-dark-2); border-color: var(--el-color-danger-light-7); }
 .el-tag--plain { background: var(--el-bg-color); }
 
-/* ---------- 消息提示 ---------- */
-.el-message { border-radius: 10px; box-shadow: var(--el-box-shadow-dark); border: 1px solid var(--el-border-color-light); }
+/* ---------- 消息提示（10px 不在 v5 四档内 → 归到 8px） ---------- */
+.el-message { border-radius: var(--p-r-sm); box-shadow: var(--el-box-shadow-dark); border: 1px solid var(--el-border-color-light); }
 
 /* ---------- 表格（记忆库用） ---------- */
 .el-table { --el-table-border-color: var(--el-border-color-lighter); --el-table-header-bg-color: var(--el-fill-color-lighter); }
@@ -295,4 +304,31 @@ body {
   --el-font-size-small: 0.78125rem;
   --el-font-size-base: 0.84375rem;
   --el-font-size-large: 0.90625rem;
+
+  /* 控件规格：高度也用 rem —— 顶栏「Aa」切档时按钮/输入框跟着缩放，不再「只缩字不缩框」 */
+  --p-ctl-h: 2rem;                        /* 32px @100%：按钮 / 输入 / 选择器统一高度 */
+  --el-component-size: 2rem;
+  --el-component-size-small: 1.5rem;
+  --el-component-size-large: 2.5rem;
+
+  /* 动效时长（曲线统一用 --squad-ease，全站一套节奏） */
+  --p-dur-fast: 0.12s;
+  --p-dur: 0.18s;
+}
+
+/* ==========================================================================
+ * 动效与可达性收口（2026-10-11）
+ * 1. 全站平滑滚动：视图跳转/锚点不再「瞬移」
+ * 2. 尊重系统「减少动态效果」：关掉过渡与动画，避免眩晕
+ * ========================================================================== */
+html { scroll-behavior: smooth; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

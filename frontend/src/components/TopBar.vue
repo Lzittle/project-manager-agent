@@ -114,14 +114,14 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 34px;
+  height: var(--p-ctl-h);          /* 与右侧项目选择器同高，横向一条线 */
   padding: 0 0.875rem;
-  border-radius: var(--p-r-pill);
+  border-radius: var(--p-r-sm);
   font-size: var(--p-fs-ui);
   font-weight: 600;
   color: var(--p-ink-2);
   text-decoration: none;
-  transition: background 0.15s var(--squad-ease), color 0.15s var(--squad-ease);
+  transition: background var(--p-dur-fast) var(--squad-ease), color var(--p-dur-fast) var(--squad-ease);
 }
 .workbench:hover { background: var(--p-line-soft); color: var(--p-ink); }
 .workbench.active { background: var(--p-brand-wash); color: var(--p-brand-strong); }

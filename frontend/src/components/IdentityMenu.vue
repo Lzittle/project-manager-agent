@@ -107,7 +107,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 <style scoped>
 /* v5 令牌（D-013）：浮层 = surface 底 + line 边 + 16 圆角；状态色走 --p-ok / --p-on-sand；危险走 --p-danger */
 .idm { position: relative; }
-.idm-trigger { display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; border-radius: var(--p-r-pill); }
+.idm-trigger { display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; border-radius: var(--p-r-sm); }
 .idm-ava {
   width: 28px; height: 28px; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
@@ -125,6 +125,11 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   border-radius: var(--p-r-lg);
   box-shadow: 0 16px 40px -12px rgba(55, 53, 47, 0.18), 0 2px 8px rgba(55, 53, 47, 0.06);
   text-align: left;
+  animation: idm-pop-in var(--p-dur) var(--squad-ease) both;   /* 浮层「下滑 + 淡入」进入 */
+}
+@keyframes idm-pop-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 .idm-head { display: flex; align-items: center; gap: 0.6rem; padding-bottom: 0.65rem; border-bottom: 1px solid var(--p-line); margin-bottom: 0.65rem; }
 .idm-headtext { line-height: var(--p-lh-tight); min-width: 0; }
@@ -137,16 +142,19 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 
 .idm-claim { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; }
 .idm-input {
-  flex: 1; min-width: 0; height: 30px; padding: 0 0.55rem;
+  flex: 1; min-width: 0; height: var(--p-ctl-h); padding: 0 0.55rem;
   border: 1px solid var(--p-line); border-radius: var(--p-r-sm);
   font-size: var(--p-fs-meta); color: var(--p-ink); background: var(--p-surface);
   outline: none; font-family: inherit;
+  transition: border-color var(--p-dur-fast) var(--squad-ease);
 }
 .idm-input:focus { border-color: var(--p-brand); }
 .idm-btn {
-  height: 30px; padding: 0 0.7rem; border-radius: var(--p-r-sm); border: 1px solid var(--p-line);
+  height: var(--p-ctl-h); padding: 0 0.7rem; border-radius: var(--p-r-sm); border: 1px solid var(--p-line);
   background: var(--p-line-soft); font-size: var(--p-fs-meta); cursor: pointer; font-family: inherit;
   color: var(--p-ink-2);
+  transition: background var(--p-dur-fast) var(--squad-ease),
+              border-color var(--p-dur-fast) var(--squad-ease);
 }
 .idm-btn.solid { background: var(--p-brand); border-color: var(--p-brand); color: #fff; }
 .idm-btn:disabled { opacity: 0.6; cursor: default; }
@@ -156,6 +164,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   padding: 0.45rem 0.55rem; border: 0; border-radius: var(--p-r-sm);
   background: transparent; font-size: var(--p-fs-ui); cursor: pointer;
   color: var(--p-ink-2); font-family: inherit;
+  transition: background var(--p-dur-fast) var(--squad-ease), color var(--p-dur-fast) var(--squad-ease);
 }
 .idm-item:hover { background: var(--p-line-soft); }
 .idm-item.primary { color: var(--p-brand-strong); font-weight: 600; }

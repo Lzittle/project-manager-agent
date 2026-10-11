@@ -53,7 +53,7 @@
 
       <!-- 未登录：登录 / 注册两个分段 -->
       <template v-else>
-        <div class="auth-tabs" role="tablist">
+        <div class="auth-tabs" role="tablist" :class="{ reg: mode === 'register' }">
           <button
             class="auth-tab"
             :class="{ on: mode === 'login' }"
@@ -203,15 +203,28 @@ function doLogout() {
 .auth-brandtext b { font-size: 1.1rem; display: block; color: var(--p-ink); }
 .auth-brandtext i { font-style: normal; font-size: var(--p-fs-eyebrow); letter-spacing: 2px; color: var(--p-idle); }
 
+/* 分段切换：白滑块用 ::before 平移做出「滑过去」的效果（不再靠底色突然切换） */
 .auth-tabs {
+  position: relative;
   display: flex;
-  gap: 4px;
   padding: 4px;
   background: var(--p-line-soft);
   border-radius: var(--p-r-pill);
   margin-bottom: 1.15rem;
 }
+.auth-tabs::before {
+  content: '';
+  position: absolute;
+  inset: 4px 50% 4px 4px;          /* 右边界压到 50% → 宽度恰等于单个 tab（无 gap） */
+  border-radius: var(--p-r-pill);
+  background: var(--p-surface);
+  box-shadow: 0 1px 2px rgba(55, 53, 47, 0.08);
+  transition: transform 0.22s var(--squad-ease);
+}
+.auth-tabs.reg::before { transform: translateX(100%); }
 .auth-tab {
+  position: relative;
+  z-index: 1;
   flex: 1;
   border: 0;
   background: transparent;
@@ -221,10 +234,10 @@ function doLogout() {
   font-weight: 600;
   color: var(--p-ink-2);
   cursor: pointer;
-  transition: background 0.15s var(--squad-ease), color 0.15s var(--squad-ease);
+  transition: color var(--p-dur) var(--squad-ease);
 }
 .auth-tab:hover { color: var(--p-ink); }
-.auth-tab.on { background: var(--p-surface); color: var(--p-brand-strong); box-shadow: 0 1px 2px rgba(55, 53, 47, 0.08); }
+.auth-tab.on { color: var(--p-brand-strong); }
 
 .auth-field { margin-bottom: 0.9rem; }
 .auth-label { display: block; font-size: var(--p-fs-meta); color: var(--p-ink-2); margin-bottom: 0.35rem; }
