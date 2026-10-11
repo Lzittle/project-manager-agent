@@ -64,61 +64,61 @@ function onDragStart(e) {
 </script>
 
 <style scoped>
-/* Linear 式任务卡：发丝边框 + 极柔阴影，状态用「点」而非彩色大标签 */
+/* Linear 式任务卡 → v5（D-013）：surface 底 + line 发丝边；状态用 8px 点；优先级用四色软块（只做底） */
 .task-card {
-  background: var(--el-bg-color);
-  border-radius: var(--squad-radius-card);
+  background: var(--p-surface);
+  border-radius: var(--p-r-sm);
   padding: 12px 14px;
   margin-bottom: 10px;
-  border: 1px solid var(--el-border-color-light);
-  box-shadow: var(--el-box-shadow-lighter);
+  border: 1px solid var(--p-line);
+  box-shadow: 0 1px 2px rgba(55, 53, 47, 0.03);
   cursor: grab;
   transition: box-shadow 0.15s var(--squad-ease), border-color 0.15s var(--squad-ease),
               transform 0.15s var(--squad-ease);
 }
 .task-card:hover {
   box-shadow: var(--squad-shadow-hover);
-  border-color: var(--el-color-primary-light-7);
+  border-color: var(--p-brand-line);
   transform: translateY(-1px);
 }
+/* 阻塞：沙色软底（v5 唯一允许「底带色」的用法），不再用 Element warning 浅色变量 */
 .task-card.blocked {
-  border-color: var(--el-color-warning-light-5);
-  background: var(--el-color-warning-light-9);
+  border-color: color-mix(in srgb, var(--p-on-sand) 30%, var(--p-line));
+  background: color-mix(in srgb, var(--p-block-sand) 42%, var(--p-surface));
 }
 .task-card:active { cursor: grabbing; }
 .tc-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 
-/* 优先级：克制的小描边 pill（不再实心色块） */
+/* 优先级：小软块（rose / sand / plain），取代原先 6 个一次性硬编码色值 */
 .tc-pri {
-  font-size: 11px;
-  line-height: 16px;
+  font-size: var(--p-fs-tag);
+  line-height: 1rem;
   padding: 0 7px;
-  border-radius: 999px;
-  border: 1px solid transparent;
+  border-radius: var(--p-r-xs);
 }
-.tc-pri.high { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
-.tc-pri.medium { color: #b88230; border-color: #f3d19e; background: #fdf6ec; }
-.tc-pri.low { color: var(--el-text-color-secondary); border-color: var(--el-border-color); background: var(--el-fill-color-lighter); }
+.tc-pri.high { color: var(--p-on-rose); background: var(--p-block-rose); }
+.tc-pri.medium { color: var(--p-on-sand); background: var(--p-block-sand); }
+.tc-pri.low { color: var(--p-ink-2); background: var(--p-block-plain); }
 
 /* 依赖 / 阻塞徽记 */
 .tc-blocked {
-  font-size: 11px;
-  color: var(--el-color-warning);
-  background: var(--el-color-warning-light-9);
+  font-size: var(--p-fs-tag);
+  color: var(--p-on-sand);
+  background: var(--p-block-sand);
   padding: 0 8px;
-  line-height: 16px;
-  border-radius: 999px;
+  line-height: 1rem;
+  border-radius: var(--p-r-xs);
   display: inline-flex;
   align-items: center;
   gap: 3px;
 }
 .tc-dep {
-  font-size: 11px;
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
+  font-size: var(--p-fs-tag);
+  color: var(--p-brand-strong);
+  background: var(--p-brand-wash);
   padding: 0 8px;
-  line-height: 16px;
-  border-radius: 999px;
+  line-height: 1rem;
+  border-radius: var(--p-r-xs);
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -129,30 +129,31 @@ function onDragStart(e) {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 12px;
-  color: var(--el-text-color-regular);
+  font-size: var(--p-fs-meta);
+  color: var(--p-ink-2);
 }
-.tc-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.st-todo .tc-dot { background: var(--el-text-color-placeholder); }
-.st-doing .tc-dot { background: var(--el-color-primary); }
-.st-done .tc-dot { background: var(--el-color-success); }
-.st-done { color: var(--el-text-color-secondary); }
+.tc-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.st-todo .tc-dot { background: var(--p-idle); }
+.st-doing .tc-dot { background: var(--p-brand); }
+.st-done .tc-dot { background: var(--p-ok); }
+.st-done { color: var(--p-idle); }
 
-.tc-title { font-size: 14px; font-weight: 600; color: var(--el-text-color-primary); margin-bottom: 4px; }
+.tc-title { font-size: var(--p-fs-title); font-weight: 600; color: var(--p-ink); margin-bottom: 4px; text-wrap: pretty; }
 .tc-desc {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
+  font-size: var(--p-fs-meta);
+  color: var(--p-ink-2);
   margin-bottom: 6px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  text-wrap: pretty;
 }
 .tc-foot { display: flex; justify-content: space-between; align-items: center; }
 .tc-meta { display: flex; align-items: center; gap: 10px; }
 .tc-assignee {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
+  font-size: var(--p-fs-meta);
+  color: var(--p-ink-2);
   display: inline-flex;
   align-items: center;
   gap: 3px;

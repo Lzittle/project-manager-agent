@@ -19,7 +19,7 @@
           style="flex: 1"
         >
           <div style="padding: 6px 0">
-            <el-icon :size="26" color="var(--el-color-primary)"><UploadFilled /></el-icon>
+            <el-icon :size="26" color="var(--p-brand)"><UploadFilled /></el-icon>
             <div class="upload-text">拖入或点击上传 .txt / .md 文档（UTF-8），自动进入知识库可被 Agent 检索</div>
           </div>
         </el-upload>
@@ -32,7 +32,7 @@
       </div>
     </el-card>
 
-    <el-card shadow="never" v-loading="loading">
+    <el-card shadow="never" class="kb-panel" v-loading="loading">
       <el-table :data="docs" size="default" row-key="id">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="title" label="标题" min-width="200" />
@@ -170,18 +170,20 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.kb-inlet { margin-bottom: 16px; border-radius: var(--squad-radius-card); }
+/* v5 令牌（D-013）：卡片按「面板」规 16 圆角；正文预览走 line-soft 底 + 阅读行高 */
+.kb-inlet { margin-bottom: 16px; }
+.kb-inlet, .kb-panel { border-radius: var(--p-r-lg); }
 .toolbar { display: flex; gap: 12px; align-items: center; }
-.upload-text { color: var(--el-text-color-secondary); font-size: 13px; line-height: 1.8; }
+.upload-text { color: var(--p-ink-2); font-size: var(--p-fs-ui); line-height: var(--p-lh-read); }
 .doc-preview {
   white-space: pre-wrap;
   word-break: break-word;
-  background: var(--el-fill-color-lighter);
+  background: var(--p-line-soft);
   padding: 12px;
-  border-radius: 6px;
-  font-size: 13px;
-  line-height: 1.7;
-  color: var(--el-text-color-primary);
+  border-radius: var(--p-r-sm);
+  font-size: var(--p-fs-ui);
+  line-height: var(--p-lh-read);
+  color: var(--p-ink);
   max-height: 240px;
   overflow-y: auto;
 }
