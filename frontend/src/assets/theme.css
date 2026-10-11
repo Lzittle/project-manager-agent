@@ -21,16 +21,21 @@
   --squad-brand-deep: #0b4a45;
   --squad-brand-wash: #e8f3f1;
 
-  /* ================= 语义色（与强调青区分） ================= */
-  --el-color-success: #16a34a;             /* 完成 · 绿 */
-  --el-color-success-dark-2: #15803d;
-  --el-color-success-light-3: #5bbb7e;
-  --el-color-success-light-5: #8ecfa6;
-  --el-color-success-light-7: #bde3cc;
-  --el-color-success-light-8: #d4ecdd;
-  --el-color-success-light-9: #eaf6ee;
+  /* ================= 语义色（与强调青区分） =================
+   * 2026-10-11：绿/红对齐 v5 调色板（--p-ok / --p-danger）。
+   * 此前 success #16a34a、danger #dc2626 是 v3 值，与 v5 的 #15794a / #b42318 不是一套；
+   * 最直观的后果是「删除」链接（走 Element 红）和「退出登录」（走 --p-danger）红得不一样。
+   * 浅色档（light-3/5/7/8/9）按 Element 惯例由基色兑白 30/50/70/80/90% 生成 ——
+   * ⚠️ 基色若再改，这几档要一并重算，否则浅色底会跑偏。 */
+  --el-color-success: var(--p-ok);         /* 完成 · 绿 = #15794a */
+  --el-color-success-dark-2: #11613b;
+  --el-color-success-light-3: #5ba180;
+  --el-color-success-light-5: #8abca5;
+  --el-color-success-light-7: #b9d7c9;
+  --el-color-success-light-8: #d0e4db;
+  --el-color-success-light-9: #e8f2ed;
 
-  --el-color-warning: #d97706;             /* 阻塞 · 琥珀 */
+  --el-color-warning: #d97706;             /* 阻塞 · 琥珀（v5 未给对应值，暂留 v3 值） */
   --el-color-warning-dark-2: #b45309;
   --el-color-warning-light-3: #e6a355;
   --el-color-warning-light-5: #eec38a;
@@ -38,21 +43,21 @@
   --el-color-warning-light-8: #f9e9d4;
   --el-color-warning-light-9: #fdf4e6;
 
-  --el-color-danger: #dc2626;
-  --el-color-danger-dark-2: #b91c1c;
-  --el-color-danger-light-3: #e87070;
-  --el-color-danger-light-5: #ef9e9e;
-  --el-color-danger-light-7: #f6c6c6;
-  --el-color-danger-light-8: #f9dada;
-  --el-color-danger-light-9: #fdeded;
+  --el-color-danger: var(--p-danger);      /* 危险 · 红 = #b42318 */
+  --el-color-danger-dark-2: #901c13;
+  --el-color-danger-light-3: #cb655d;
+  --el-color-danger-light-5: #da918c;
+  --el-color-danger-light-7: #e9bdba;
+  --el-color-danger-light-8: #f0d3d1;
+  --el-color-danger-light-9: #f8e9e8;
 
-  --el-color-error: #dc2626;
-  --el-color-error-dark-2: #b91c1c;
-  --el-color-error-light-3: #e87070;
-  --el-color-error-light-5: #ef9e9e;
-  --el-color-error-light-7: #f6c6c6;
-  --el-color-error-light-8: #f9dada;
-  --el-color-error-light-9: #fdeded;
+  --el-color-error: var(--p-danger);
+  --el-color-error-dark-2: #901c13;
+  --el-color-error-light-3: #cb655d;
+  --el-color-error-light-5: #da918c;
+  --el-color-error-light-7: #e9bdba;
+  --el-color-error-light-8: #f0d3d1;
+  --el-color-error-light-9: #f8e9e8;
 
   --el-color-info: #64748b;
   --el-color-info-dark-2: #475569;
