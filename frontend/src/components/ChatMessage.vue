@@ -125,7 +125,7 @@ const rendered = computed(() => miniMd(props.content))
   flex-shrink: 0; color: #fff; font-size: 16px;
   box-shadow: var(--p-shadow-1);
 }
-.avatar.assistant { background: linear-gradient(135deg, #14a08f, var(--p-brand) 60%, var(--p-brand-strong)); }
+.avatar.assistant { background: linear-gradient(135deg, var(--p-brand-lift), var(--p-brand) 60%, var(--p-brand-strong)); }
 .avatar.user { background: var(--p-line-soft); color: var(--p-ink-2); }
 
 .bubble {

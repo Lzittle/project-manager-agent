@@ -3,11 +3,11 @@
     <div class="auth-card">
       <div class="auth-brand">
         <svg viewBox="0 0 32 32" class="auth-mark" aria-hidden="true">
-          <rect width="32" height="32" rx="8" fill="#0f766e" />
-          <circle cx="12" cy="13" r="4" fill="#fff" />
-          <circle cx="21" cy="13" r="4" fill="#7dd8cf" />
-          <path d="M8 24c1-4 2.5-6 4-6s3 2 4 6" fill="#fff" />
-          <path d="M17 24c1-4 2.5-6 4-6s3 2 4 6" fill="#7dd8cf" />
+          <rect width="32" height="32" rx="8" class="mark-bg" />
+          <circle cx="12" cy="13" r="4" class="mark-fg" />
+          <circle cx="21" cy="13" r="4" class="mark-alt" />
+          <path d="M8 24c1-4 2.5-6 4-6s3 2 4 6" class="mark-fg" />
+          <path d="M17 24c1-4 2.5-6 4-6s3 2 4 6" class="mark-alt" />
         </svg>
         <div class="auth-brandtext">
           <b>Squad</b><i>小队智脑</i>
@@ -194,7 +194,7 @@ function doLogout() {
   background: var(--p-surface);
   border: 1px solid var(--p-line);
   border-radius: var(--p-r-lg);
-  box-shadow: 0 2px 10px -2px rgba(55, 53, 47, 0.06), 0 1px 2px rgba(55, 53, 47, 0.04);
+  box-shadow: var(--p-shadow-2);
   padding: 1.75rem 1.6rem 1.5rem;
 }
 .auth-brand { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1.25rem; }
@@ -218,7 +218,7 @@ function doLogout() {
   inset: 4px 50% 4px 4px;          /* 右边界压到 50% → 宽度恰等于单个 tab（无 gap） */
   border-radius: var(--p-r-pill);
   background: var(--p-surface);
-  box-shadow: 0 1px 2px rgba(55, 53, 47, 0.08);
+  box-shadow: var(--p-shadow-1);
   transition: transform 0.22s var(--squad-ease);
 }
 .auth-tabs.reg::before { transform: translateX(100%); }

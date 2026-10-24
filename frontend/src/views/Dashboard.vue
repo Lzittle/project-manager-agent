@@ -231,47 +231,58 @@ const rails = computed(() => [...rows.value].sort((a, b) => b.pct - a.pct))
 const railDot = (r) => (r.status === 'archived' ? 'dot-archived' : `dot-${r.completion || 'none'}`)
 
 // ---------- 状态分布环形图 ----------
-// 色值取 v5 令牌的字面量（ECharts 配置拿不到 CSS 变量）：
-// ink #37352f · ink-2 #6b6a66 · idle #838d94 · line #e9e9e7 · brand #0f766e · ok #15794a
+// ECharts 只认具体色值，读不到 var()。以前是把令牌的字面量抄一遍，
+// 结果是「改了 theme.css，图表不跟」。现在运行时从 :root 读令牌，令牌仍是唯一来源。
+const tok = (name, fallback) => getComputedStyle(document.documentElement)
+  .getPropertyValue(name).trim() || fallback
 function renderDonut() {
   if (!donutEl.value) return
   if (!donutChart) donutChart = echarts.init(donutEl.value)
   const { total, todo, doing, done } = stats.value
+  const T = {
+    surface: tok('--p-surface', '#ffffff'),
+    line: tok('--p-line', '#e9e9e7'),
+    ink: tok('--p-ink', '#37352f'),
+    ink2: tok('--p-ink-2', '#6b6a66'),
+    idle: tok('--p-idle', '#838d94'),
+    brand: tok('--p-brand', '#0f766e'),
+    ok: tok('--p-ok', '#15794a'),
+  }
   donutChart.setOption({
     tooltip: {
       trigger: 'item',
       formatter: '{b}：{c} 项（{d}%）',
-      backgroundColor: '#ffffff',
-      borderColor: '#e9e9e7',
+      backgroundColor: T.surface,
+      borderColor: T.line,
       borderWidth: 1,
-      textStyle: { color: '#37352f', fontSize: 13 },
+      textStyle: { color: T.ink, fontSize: 13 },
     },
     legend: {
       bottom: 0,
       icon: 'circle',
       itemWidth: 10,
       itemHeight: 10,
-      textStyle: { color: '#6b6a66', fontSize: 12 },
+      textStyle: { color: T.ink2, fontSize: 12 },
     },
     title: {
       text: String(total),
       subtext: '任务总数',
       left: 'center',
       top: '34%',
-      textStyle: { fontSize: 30, fontWeight: 600, color: '#37352f' },
-      subtextStyle: { fontSize: 12, color: '#838d94' },
+      textStyle: { fontSize: 30, fontWeight: 600, color: T.ink },
+      subtextStyle: { fontSize: 12, color: T.idle },
     },
     series: [{
       type: 'pie',
       radius: ['55%', '76%'],
       center: ['50%', '44%'],
-      itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+      itemStyle: { borderRadius: 6, borderColor: T.surface, borderWidth: 2 },
       label: { show: false },
-      emphasis: { label: { show: true, fontSize: 15, fontWeight: 600, color: '#37352f' } },
+      emphasis: { label: { show: true, fontSize: 15, fontWeight: 600, color: T.ink } },
       data: [
-        { value: todo, name: '待办', itemStyle: { color: '#838d94' } },
-        { value: doing, name: '进行中', itemStyle: { color: '#0f766e' } },
-        { value: done, name: '已完成', itemStyle: { color: '#15794a' } },
+        { value: todo, name: '待办', itemStyle: { color: T.idle } },
+        { value: doing, name: '进行中', itemStyle: { color: T.brand } },
+        { value: done, name: '已完成', itemStyle: { color: T.ok } },
       ],
     }],
   }, true)

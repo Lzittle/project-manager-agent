@@ -123,7 +123,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   background: var(--p-surface);
   border: 1px solid var(--p-line);
   border-radius: var(--p-r-lg);
-  box-shadow: 0 16px 40px -12px rgba(55, 53, 47, 0.18), 0 2px 8px rgba(55, 53, 47, 0.06);
+  box-shadow: var(--p-shadow-3);
   text-align: left;
   animation: idm-pop-in var(--p-dur) var(--squad-ease) both;   /* 浮层「下滑 + 淡入」进入 */
 }

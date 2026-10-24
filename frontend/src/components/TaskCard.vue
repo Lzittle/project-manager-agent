@@ -71,7 +71,7 @@ function onDragStart(e) {
   padding: 12px 14px;
   margin-bottom: 10px;
   border: 1px solid var(--p-line);
-  box-shadow: 0 1px 2px rgba(55, 53, 47, 0.03);
+  box-shadow: var(--p-shadow-1);
   cursor: grab;
   transition: box-shadow 0.15s var(--squad-ease), border-color 0.15s var(--squad-ease),
               transform 0.15s var(--squad-ease);

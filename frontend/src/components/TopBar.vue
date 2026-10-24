@@ -3,11 +3,11 @@
     <div class="tb-left">
       <router-link to="/" class="brand" title="回到工作台">
         <svg viewBox="0 0 32 32" class="brand-mark" aria-hidden="true">
-          <rect width="32" height="32" rx="8" fill="#0f766e" />
-          <circle cx="12" cy="13" r="4" fill="#fff" />
-          <circle cx="21" cy="13" r="4" fill="#7dd8cf" />
-          <path d="M8 24c1-4 2.5-6 4-6s3 2 4 6" fill="#fff" />
-          <path d="M17 24c1-4 2.5-6 4-6s3 2 4 6" fill="#7dd8cf" />
+          <rect width="32" height="32" rx="8" class="mark-bg" />
+          <circle cx="12" cy="13" r="4" class="mark-fg" />
+          <circle cx="21" cy="13" r="4" class="mark-alt" />
+          <path d="M8 24c1-4 2.5-6 4-6s3 2 4 6" class="mark-fg" />
+          <path d="M17 24c1-4 2.5-6 4-6s3 2 4 6" class="mark-alt" />
         </svg>
         <span class="brand-text">
           <span class="brand-name">Squad</span>
