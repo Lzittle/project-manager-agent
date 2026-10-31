@@ -65,8 +65,10 @@ def _isolation_tables():
         from models.database import (ActionRun, AssignmentRun, ChatMessage,
                                      KnowledgeDocument, Member, NoteDraft, PlanRun,
                                      Project, Task, TaskComment, TaskDependency, User)
+        from models.task_breakdown import Subtask
         _ISOLATION_TABLES = [TaskDependency, TaskComment, ChatMessage, ActionRun, AssignmentRun,
-                             PlanRun, NoteDraft, KnowledgeDocument, Task, Project, Member, User]
+                             PlanRun, NoteDraft, KnowledgeDocument, Subtask, Task, Project,
+                             Member, User]
     return _ISOLATION_TABLES
 
 

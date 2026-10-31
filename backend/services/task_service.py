@@ -8,7 +8,7 @@ from typing import Optional
 from sqlalchemy.orm import Session, selectinload
 
 from models.database import Project, Task, TaskComment, TaskDependency
-from services import member_service
+from services import member_service, subtask_service
 
 
 # ---------- 任务 ----------
@@ -76,6 +76,7 @@ def delete_task(db: Session, task_id: int) -> Optional[dict]:
         (TaskDependency.task_id == task_id) | (TaskDependency.depends_on_id == task_id)
     ).delete(synchronize_session=False)
     db.query(TaskComment).filter_by(task_id=task_id).delete(synchronize_session=False)
+    subtask_service.delete_for_parent(db, task_id)
     db.delete(t)
     db.commit()
     return snapshot

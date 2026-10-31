@@ -15,7 +15,7 @@ from api.auth import optional_viewer
 from models.database import get_db, Task, Member, Project
 from models.schemas import (CommentCreate, CommentOut, DependencyCreate,
                             MyTaskOut, TaskCreate, TaskOut, TaskUpdate)
-from services import task_service, visibility
+from services import task_service, visibility, subtask_service
 
 router = APIRouter()
 
@@ -51,6 +51,8 @@ def _with_deps(db: Session, task) -> dict:
         if pre is None or pre.status != "done":
             blocked += 1
     d["blocked_by_count"] = blocked
+    d.update(subtask_service.summaries(db, [task.id]).get(
+        task.id, {"subtask_count": 0, "subtask_done_count": 0}))
     return d
 
 
@@ -61,10 +63,12 @@ def _list_with_deps(db: Session, tasks) -> list[dict]:
     """
     status = {t.id: t.status for t in tasks}
     members = _assignee_map(db, tasks)
+    breakdown = subtask_service.summaries(db, [t.id for t in tasks])
     return [
         {**_base_dict(t, members.get(t.assignee_id)),
          "blocked_by_count": sum(
-             1 for dep in t.dependencies if status.get(dep.depends_on_id) != "done")}
+             1 for dep in t.dependencies if status.get(dep.depends_on_id) != "done"),
+         **breakdown.get(t.id, {"subtask_count": 0, "subtask_done_count": 0})}
         for t in tasks
     ]
 

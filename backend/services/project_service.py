@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from core import rag
 from models.database import Project, Task, TaskComment, TaskDependency, KnowledgeDocument
+from services import subtask_service
 
 MAX_PROJECT_DEPTH = 3  # 项目层级上限：根(1 级) → 子项目(2 级) → 孙项目(3 级)
 
@@ -121,6 +122,7 @@ def _delete_one(db: Session, project_id: int) -> Optional[dict]:
         ).delete(synchronize_session=False)
         db.query(TaskComment).filter(TaskComment.task_id.in_(task_ids)).delete(
             synchronize_session=False)
+        subtask_service.delete_for_tasks(db, task_ids)
         db.query(Task).filter(Task.id.in_(task_ids)).delete(synchronize_session=False)
 
     # 3) 项目本身

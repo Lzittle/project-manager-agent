@@ -95,7 +95,7 @@ cd /d/project/project-manager-agent/backend
 
 - 每个逻辑步骤一个本地 commit（不 push），便于回退：`feat/fix/chore(scope): 说明`
 - 代码改动 + 对应测试**同一提交**内完成。
-- 运维类经验沉淀到本文档或 `.workbuddy/memory/`，不进业务提交。
+- 运维类经验沉淀到本文档或私有项目工作区的 `.workbuddy/memory/`，不进业务提交。
 
 ---
 

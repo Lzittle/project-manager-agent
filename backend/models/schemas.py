@@ -119,6 +119,9 @@ class TaskOut(BaseModel):
     depends_on: Optional[list[int]] = None
     # 阻塞角标：尚未完成的前置任务数（>0 表示本任务被依赖阻塞，无法开工）
     blocked_by_count: Optional[int] = 0
+    # 小块汇总：明细通过 /subtasks 子资源读取，父任务卡片只展示进度
+    subtask_count: int = 0
+    subtask_done_count: int = 0
 
 
 class MyTaskOut(TaskOut):
@@ -128,6 +131,37 @@ class MyTaskOut(TaskOut):
     所以由接口层一次查表补 `project_name`（不是 tasks 表的列）。
     """
     project_name: Optional[str] = None
+
+
+# ---------- 任务小块 ----------
+class SubtaskCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: str = ""
+    status: TaskStatus = "todo"
+    assignee_id: Optional[int] = None
+
+
+class SubtaskUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    description: Optional[str] = None
+    status: Optional[TaskStatus] = None
+    assignee_id: Optional[int] = None
+
+
+class SubtaskOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    parent_task_id: int
+    title: str
+    description: Optional[str] = ""
+    status: str
+    assignee_id: Optional[int] = None
+    assignee_name: Optional[str] = None
+    assignee_status: Optional[str] = None
+    creator_id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 # ---------- 任务依赖 ----------

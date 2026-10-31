@@ -43,6 +43,8 @@ def get_db():
 
 def init_db() -> None:
     """启动时调用：按模型定义建表（已存在则跳过），随后执行轻量迁移（补列等）。"""
+    # 单独模块承载小块模型，导入后才会注册到同一个 Base 的 metadata。
+    from models.task_breakdown import Subtask  # noqa: F401
     Base.metadata.create_all(bind=engine)
     _run_light_migrations(engine)
 

@@ -5,7 +5,7 @@ from fastapi import FastAPI
 
 from core.config import settings
 from models.database import init_db
-from api import projects, tasks, knowledge, chat, members, auth
+from api import projects, tasks, knowledge, chat, members, auth, subtasks
 
 
 @asynccontextmanager
@@ -28,6 +28,7 @@ def health_check():
 # 业务路由
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
+app.include_router(subtasks.router, prefix="/api/tasks", tags=["subtasks"])
 app.include_router(members.router, prefix="/api/members", tags=["members"])
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(knowledge.router, prefix="/api", tags=["knowledge"])

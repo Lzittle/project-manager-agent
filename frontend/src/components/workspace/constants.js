@@ -8,11 +8,11 @@ export const FONT_SCALES = [
   { key: 'large', label: '大', root: '112.5%' },
 ]
 
-// 左栏「规划文书」：界面上只是说明，真正的文件在仓库里（D-008 已记这个缺口）
+// 左栏「开发文档」：只展示公开技术文档；产品规划与任务清单保存在私有工作区
 export const repoDocs = [
-  { name: 'PLAN.md', note: '要什么', text: '仓库根目录 · 唯一事实源：做什么、不做什么、验收标准。Agent 每次对话自动读它。' },
-  { name: 'DECISIONS.md', note: '为什么', text: '仓库根目录 · 已经定过的决策与踩过的坑，只追加不改。指派不改变状态就是 D-005。' },
-  { name: 'docs/WORKFLOW.md', note: '怎么干', text: 'docs/ 下 · 每轮节奏：产出 → 人拍板 → 落盘。一轮只推进一个能验证的小步。' },
+  { name: 'README.md', note: '项目说明', text: '公开仓库 · 产品定位、架构、快速开始和公开能力说明。' },
+  { name: 'docs/DEV_OPS.md', note: '运行维护', text: '公开仓库 · 本地启动、端口排查、重启和行为探针规则。' },
+  { name: 'backend/eval/README.md', note: '评测说明', text: '公开仓库 · 离线 Agent 评测的运行方式和判定口径。' },
 ]
 
 export const filters = [
